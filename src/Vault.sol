@@ -31,6 +31,7 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
     /// @param _vaultFee The vault fee in basis points
     /// @param _feeRecipient The address of the fee recipient
     constructor(
+        address _owner,
         address _asset, 
         string memory _name, 
         string memory _symbol,
@@ -39,7 +40,7 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
     )
      ERC4626(IERC20(_asset)) 
      ERC20(_name, _symbol)
-     Ownable(msg.sender)
+     Ownable(_owner)
      {
         if (_asset == address(0)) revert ErrorsLib.ZeroAddress();
         if (_feeRecipient == address(0)) revert ErrorsLib.ZeroAddress();
