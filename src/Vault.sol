@@ -11,6 +11,9 @@ import {ErrorsLib} from "./libraries/ErrorsLib.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {IVault} from "./interfaces/IVault.sol";
 
+/// @title Vault
+/// @notice This is a ERC4626 vault contract, which allows users deposit assets and earn interest on them.
+/// Vault takes entry fee which will be sent to the fee recipient. The fee is taken during the deposit or mint operation.
 contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
     using SafeERC20 for IERC20;
 
@@ -41,7 +44,7 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
      ERC4626(IERC20(_asset)) 
      ERC20(_name, _symbol)
      Ownable(_owner)
-     {
+    {
         if (_asset == address(0)) revert ErrorsLib.ZeroAddress();
         if (_feeRecipient == address(0)) revert ErrorsLib.ZeroAddress();
         if (_vaultFee >= 10_000) revert ErrorsLib.InvalidFeeBPS();
