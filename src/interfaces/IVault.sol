@@ -8,12 +8,11 @@ interface IVault {
     /// @notice Vault fee recipient address. Can not be the zero address.
     function FEE_RECIPIENT() external view returns (address);
     
-    /// @notice Deposit `assets` underlying tokens and send the corresponding number of vault shares (`shares`) to `receiver`.
-    /// Take an `FEE_BPS` fee from deposited assets amount and send it to `FEE_RECIPIENT`. Function is using a gasless transaction 
-    /// mechanism, that allows the `owner` to sign a permit signature off chain(using ERC2612) before calling this function, 
-    /// and provide the signature components.
+    /// @notice Deposit `assets` underlying tokens on behalf of the `owner` and send in exchange the corresponding number of vault shares to `receiver`.
+    /// This function is using a gasless transaction mechanism, that allows the `owner` to sign a permit signature off chain(using ERC2612) 
+    /// before calling this function, and provide the signature components.
     ///
-    /// Function can be used to allow relayers to deposit assets on behalf of the user.
+    /// This function can be used to allow relayers to deposit assets on behalf of the user.
     ///
     /// @param assets The amount of assets to deposit.
     /// @param owner The owner of the underlying assets.
@@ -28,23 +27,22 @@ interface IVault {
     ///
     /// Important: This function can be called only if the underlying asset supports ERC2612 permit functionality.
     ///
-    /// @return The amount of shares the user will receive (after fee).
+    /// @return The amount of shares the user will receive.
     function depositWithPermit(
         uint256 assets, 
         address owner,
         address receiver, 
-        uint256 deadline, 
+        uint256 deadline,
         uint8 permitV, 
         bytes32 permitR, 
         bytes32 permitS
     ) external returns (uint256);
 
-    /// @notice Mints exactly `shares` vault shares to `receiver` in exchange for `assets` underlying tokens.
-    /// Takes an `FEE_BPS` fee from required assets amount for shares minting, and sends it to `FEE_RECIPIENT`. 
-    /// Function is using a gasless transaction mechanism, that allows the `owner` to sign a permit signature off chain(using ERC2612) 
+    /// @notice Mints exactly `shares` vault shares to `receiver` in exchange for assets transferred on behalf of the `owner`. 
+    /// This function is using a gasless transaction mechanism, that allows the `owner` to sign a permit signature off chain(using ERC2612) 
     /// before calling this function, and provide the signature components.
     ///
-    /// Function can be used to allow relayers to mint shares on behalf of the user.
+    /// This function can be used to allow relayers to mint shares on behalf of the user.
     ///
     /// @param shares The amount of shares to mint.
     /// @param owner The owner of the underlying assets.
@@ -59,7 +57,7 @@ interface IVault {
     ///
     /// Important: This function can be called only if the underlying asset supports ERC2612 permit functionality.
     ///
-    /// @return The amount of assets the user will send (including fee).
+    /// @return The amount of assets the user will send.
     function mintWithPermit(
         uint256 shares, 
         address owner,
