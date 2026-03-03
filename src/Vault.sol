@@ -55,71 +55,25 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
     /* ERC4626 (PUBLIC) */
 
     /// @inheritdoc IERC4626
-    /// @dev Calculates the amount of shares for a given amount of assets - `FEE_BPS` entry fee.
-    /// @return The amount of shares the user will receive after the fee is taken.
-    function previewDeposit(uint256 assets) public view virtual override returns (uint256) {
-        uint256 fee = _fee(assets);
-        return super.previewDeposit(assets - fee);
-    }
-
-    /// @inheritdoc IERC4626
-    /// @dev Calculates the amount of assets needed to mint a given amount of shares, including the `FEE_BPS` entry fee.
-    /// @return The amount of assets(including fee) the user must send to mint the requested shares.
-    function previewMint(uint256 shares) public view virtual override returns (uint256) {
-        // Calculate net assets needed (without fee) to mint the requested shares
-        uint256 netAssets = super.previewMint(shares);
-        uint256 denominator = 10000 - FEE_BPS;
-        // Gross up to include the fee
-        uint256 assetsGross = (netAssets * 10000 + denominator - 1) / denominator;
-        return assetsGross;
-    }
-
-    /// @inheritdoc IERC4626
-    /// @dev Deposits assets into the vault, and take a deposit `FEE_BPS` fee.
-    /// The fee is sent to `FEE_RECIPIENT`.
+    /// @dev Can be paused by the owner in case of emergency.
     function deposit(uint256 assets, address receiver) public virtual override whenNotPaused returns (uint256) {
-        uint256 maxAssets = maxDeposit(receiver);
-        if (assets > maxAssets) {
-            revert ERC4626ExceededMaxDeposit(receiver, assets, maxAssets);
-        }
-
-        uint256 fee = _fee(assets);
-        if (fee > 0) {
-            IERC20(asset()).safeTransferFrom(msg.sender, FEE_RECIPIENT, fee);
-        }
-        
-        uint256 shares = previewDeposit(assets);
-        super._deposit(_msgSender(), receiver, assets - fee, shares);
-        
-        return shares;
+        return super.deposit(assets, receiver);        
     }
 
     /// @inheritdoc IERC4626
-    /// @dev Mints shares to `receiver` by taking the required assets (including fee) from the caller.
-    /// The fee is sent to `FEE_RECIPIENT`.
+    /// @dev Can be paused by the owner in case of emergency.
     function mint(uint256 shares, address receiver) public virtual override whenNotPaused returns (uint256) {
-        uint256 maxShares = maxMint(receiver);
-        if (shares > maxShares) {
-            revert ERC4626ExceededMaxMint(receiver, shares, maxShares);
-        }
-        
-        uint256 assetsGross = previewMint(shares);
-        uint256 fee = _fee(assetsGross);
-        if (fee > 0) {
-            IERC20(asset()).safeTransferFrom(msg.sender, FEE_RECIPIENT, fee);
-        }
-        
-        super._deposit(_msgSender(), receiver, assetsGross - fee, shares);
-        
-        return assetsGross;
+       return super.mint(shares, receiver);
     }
 
     /// @inheritdoc IERC4626
+    /// @dev Can be paused by the owner in case of emergency.
     function withdraw(uint256 assets, address receiver, address owner) public virtual override whenNotPaused returns (uint256) {
         return super.withdraw(assets, receiver, owner);
     }
 
     /// @inheritdoc IERC4626
+    /// @dev Can be paused by the owner in case of emergency.
     function redeem(uint256 shares, address receiver, address owner) public virtual override whenNotPaused returns (uint256) {
         return super.redeem(shares, receiver, owner);
     }
@@ -189,57 +143,44 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
 
     /* INTERNAL FUNCTIONS */
 
-    /// @notice Calculates the fee for a given amount of assets.
-    /// @param assets The amount of assets to calculate the fee for.
-    /// @return The fee amount.
-    function _fee(uint256 assets) internal view returns (uint256) {
-        return (assets * FEE_BPS) / 10000;
-    }
-
-    /// @notice Deposits assets from `owner` to `receiver` and takes the `FEE_BPS` fee.
+    /// @notice Deposits `assets` on behalf of the `owner` and sends in exchange the corresponding number of shares to `receiver`.
+    /// @dev This function is used inside `depositWithPermit` function to deposit assets on behalf of the `owner`
+    /// and send in exchange the corresponding number of shares to `receiver`.
     /// 
     /// @param owner The owner of the assets.
     /// @param assets The amount of assets to deposit.
     /// @param receiver The address to receive the shares.
-    /// @return The amount of shares the user will receive after the fee is taken.
+    /// @return The amount of shares the user will receive.
     function _depositFrom(address owner, uint256 assets, address receiver) internal returns (uint256) {
         uint256 maxAssets = maxDeposit(receiver);
         if (assets > maxAssets) {
             revert ERC4626ExceededMaxDeposit(receiver, assets, maxAssets);
         }
-
-        uint256 fee = _fee(assets);
-        if (fee > 0) {
-            IERC20(asset()).safeTransferFrom(owner, FEE_RECIPIENT, fee);
-        }
-        
+    
         uint256 shares = previewDeposit(assets);
-        super._deposit(owner, receiver, assets - fee, shares);
+        super._deposit(owner, receiver, assets, shares);
         
         return shares;
     }
 
-    /// @notice Takes assets from `owner` and mints shares to `receiver` and takes the `FEE_BPS` fee.
+    /// @notice Mints `shares` amount of shares to `receiver` in exchange for assets transferred on behalf of the `owner`. 
+    /// @dev This function is used inside `mintWithPermit` function to mint `shares` to `receiver` and send in exchange 
+    /// the corresponding number of assets on behalf of the `owner` to the vault contract.
     /// 
     /// @param owner The owner of the assets.
     /// @param shares The amount of shares to mint.
     /// @param receiver The address to receive the shares.
-    /// @return The amount of assets the user will send (including fee).
+    /// @return The amount of assets the user sent.
     function _mintFrom(address owner, uint256 shares, address receiver) internal returns (uint256) {
         uint256 maxShares = maxMint(receiver);
         if (shares > maxShares) {
             revert ERC4626ExceededMaxMint(receiver, shares, maxShares);
         }
         
-        uint256 assetsGross = previewMint(shares);
-        uint256 fee = _fee(assetsGross);
-        if (fee > 0) {
-            IERC20(asset()).safeTransferFrom(owner, FEE_RECIPIENT, fee);
-        }
+        uint256 assets = previewMint(shares);
+        super._deposit(owner, receiver, assets, shares);
         
-        super._deposit(owner, receiver, assetsGross - fee, shares);
-        
-        return assetsGross;
+        return assets;
     }
 
     /* ERC4626 (INTERNAL) */
