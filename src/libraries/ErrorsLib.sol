@@ -20,6 +20,33 @@ library ErrorsLib {
     /// @notice Thrown when the sender is not the vault
     error NotVault();
 
-    /// @notice Thrown when user depositing zero assets amount in the strategy
+    /// @notice Thrown when the sender is not the guardian
+    error NotGuardian();
+
+    /// @notice Thrown when the sender is neither the owner nor the curator
+    error NotOwnerOrCurator();
+
+    /// @notice Thrown when trying to act before a timelock has expired
+    error TimelockNotElapsed();
+
+    /// @notice Thrown when the pending timelock update already exists, and it's not yet accepted
+    error PendingTimelockExists();
+
+    /// @notice Thrown when there is no pending change to act on
+    error NoPendingChange();
+
+    /// @notice Thrown when the timelock duration is invalid
+    error InvalidTimelock();
+
+    /// @notice Thrown when vault depositing zero assets amount in the strategy
     error ZeroAssetsStrategyInAmount();
+
+    /// @notice Thrown when the timelock duration is greater than the maximum allowed
+    error MaxTimelockExceeded();
+
+    /// @notice Thrown when the timelock duration is less than the minimum allowed
+    error MinTimelockNotReached();
+
+    /// @notice Thrown when the storage value is already set.
+    error AlreadySet();
 }

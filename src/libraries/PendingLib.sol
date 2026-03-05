@@ -3,7 +3,7 @@ pragma solidity 0.8.30;
 
 import {ErrorsLib} from "./ErrorsLib.sol";
 
-/// @notice A struct to store a pending value that can be set at a future time.
+/// @notice A struct to store a pending value that can be set after a timelock period.
 /// @param value The pending value to set
 /// @param validAt The timestamp at which the value becomes valid
 struct PendingUint192 {
@@ -11,7 +11,7 @@ struct PendingUint192 {
     uint64 validAt;
 }
 
-/// @notice A struct to store a pending address that can be set at a future time.
+/// @notice A struct to store a pending address that can be set after a timelock period.
 /// @param value The pending value to set
 /// @param validAt The timestamp at which the value becomes valid
 struct PendingAddress {
@@ -31,7 +31,7 @@ library PendingLib {
     /// @param pending The pending `PendingUint192` struct to update
     /// @param newValue The new value to set
     /// @param timelockDuration The duration of the timelock
-    function update(PendingUint192 memory pending, uint192 newValue, uint256 timelockDuration) internal view {
+    function update(PendingUint192 storage pending, uint192 newValue, uint256 timelockDuration) internal {
         pending.value = newValue;
         pending.validAt = uint64(block.timestamp + timelockDuration);
     }
@@ -40,7 +40,7 @@ library PendingLib {
     /// @param pending The pending `PendingAddress` struct to update
     /// @param newValue The new value to set
     /// @param timelockDuration The duration of the timelock
-    function update(PendingAddress memory pending, address newValue, uint256 timelockDuration) internal view {
+    function update(PendingAddress storage pending, address newValue, uint256 timelockDuration) internal {
         pending.value = newValue;
         pending.validAt = uint64(block.timestamp + timelockDuration);
     }
