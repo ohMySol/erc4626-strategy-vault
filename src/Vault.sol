@@ -12,8 +12,23 @@ import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {IVault} from "./interfaces/IVault.sol";
 
 /// @title Vault
-/// @notice This is a ERC4626 vault contract, which allows users deposit assets and earn interest on them.
-/// Vault takes entry fee which will be sent to the fee recipient. The fee is taken during the deposit or mint operation.
+/// @author @ohMySol
+/// @notice This is an ERC4626 vault contract, which allows users deposit assets and earn interest on them.
+/// Assets will be allocated to different yield strategies by `Allocator`, and the strategies will be selected by the vault `Curator`.
+/// Strategy can be created in a permissionless way, so anyone is allowed to create a strategy contract and propose it to include in the vault. 
+/// Once strategy is approved by curator and included in the vault, the strategy owner can earn a portion of the performance fee which is taken
+/// from the generated yield.
+///
+/// @dev This contract demonstrates an ERC4626 vault contract which can be connected to different yield strategies.
+/// Each strategy contract that wants to be used by the vault contract must implement the `BaseStrategy` contract
+/// by inheriting from it.
+/// `BaseStrategy` contract implements the `IStrategy` interface and provides a base functionality for all strategies,
+/// which is important for the vault contract to interact with the strategies.
+///
+/// IMPORTANT: 
+/// - This contract is not production ready (not audited) and is for PROTOTYPE/DEMONSTRATION purposes only.
+/// - The proposed strategy should pass a strict set of validations like risk assessment, performance metrics, auditing, etc., 
+///   before being included in the vault.
 contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
     using SafeERC20 for IERC20;
 

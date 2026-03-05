@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.30;
 
+/// @title IVault
+/// @author @ohMySol
+/// @notice Interface that defines the functions for the Vault contract.
 interface IVault {
     /// @notice Vault fee in basis points. Can not be greater than 100%(10_000 BPS).
     function FEE_BPS() external view returns (uint256);
