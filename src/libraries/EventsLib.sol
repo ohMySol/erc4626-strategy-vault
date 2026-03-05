@@ -2,7 +2,8 @@
 pragma solidity 0.8.30;
 
 /// @title EventsLib
-/// @notice Library of events for the Vault contract
+/// @author @ohMySol
+/// @notice Library of events for the project contracts
 library EventsLib {
     /// @notice Emitted when a new vault is created
     /// @param vault The address of the newly created vault

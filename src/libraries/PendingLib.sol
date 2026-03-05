@@ -20,6 +20,7 @@ struct PendingAddress {
 }
 
 /// @title PendingLib
+/// @author @ohMySol
 /// @notice Library for managing pending values and their validity timestamps.
 /// Before doing the critical update in the vault, such as adding a new strategy,
 /// or changing the caps, this change is stored in a pending state(under timelock). 
