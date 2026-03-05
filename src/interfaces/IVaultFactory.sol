@@ -10,6 +10,7 @@ interface IVaultFactory {
     function isValidVault(address vault) external view returns (bool);
 
     /// @notice Creates a new vault and returns the newly deployed vault instance
+    /// @dev Deploy new `Vault` contract, index it and emit `VaultCreated` event
     ///
     /// @param _vaultOwner The address of the owner of the vault
     /// @param _asset The address of the underlying asset
@@ -17,15 +18,15 @@ interface IVaultFactory {
     /// @param _symbol The symbol of the vault
     /// @param _vaultFee The vault fee in basis points
     /// @param _feeRecipient The address of the fee recipient
+    /// @param _timelock The timelock duration in seconds
     /// @return vault The newly deployed vault instance
-    ///
-    /// @dev Deploy new `Vault` contract, index it and emit `VaultCreated` event.
     function createVault(
         address _vaultOwner,
         address _asset, 
         string memory _name, 
         string memory _symbol,
         uint256 _vaultFee,
-        address _feeRecipient
+        address _feeRecipient,
+        uint256 _timelock
     ) external returns (IVault vault);
 }

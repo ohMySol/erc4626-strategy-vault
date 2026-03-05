@@ -27,9 +27,19 @@ contract VaultFactory is IVaultFactory {
         string memory _name, 
         string memory _symbol,
         uint256 _vaultFee,
-        address _feeRecipient
+        address _feeRecipient,
+        uint256 _timelock
     ) external returns (IVault vault) {
-        vault = new Vault(_vaultOwner, _asset, _name, _symbol, _vaultFee, _feeRecipient);
+        vault = new Vault(
+            _vaultOwner, 
+            _asset, 
+            _name, 
+            _symbol, 
+            _vaultFee, 
+            _feeRecipient,
+            _timelock
+        );
+        
         isValidVault[address(vault)] = true;
 
         emit EventsLib.VaultCreated(
