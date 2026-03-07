@@ -32,7 +32,9 @@ contract VaultFactoryTest is Test {
             "vToken",         // name
             "vTK",            // symbol
             1000,             // vault fee
-            owner             // fee recipient
+            owner,            // fee recipient
+            5000,             // vault fee share
+            2 days            // timelock duration
         );
 
         assertEq(vaultFactory.isValidVault(address(vault)), true);
@@ -49,7 +51,8 @@ contract VaultFactoryTest is Test {
             "vToken",
             "vTK",
             1000,
-            owner
+            owner,
+            2 days
         );
 
         vm.startPrank(owner);
@@ -59,7 +62,9 @@ contract VaultFactoryTest is Test {
             "vToken",
             "vTK",
             1000,
-            owner
+            owner,
+            5000,
+            2 days
         );
         vm.stopPrank();
     }
@@ -68,11 +73,13 @@ contract VaultFactoryTest is Test {
         vm.expectRevert();
         vaultFactory.createVault(
             owner,
-            address(0),
+            address(0), // invalid asset address
             "vToken",
             "vTK",
             1000,
-            owner
+            owner,
+            1000,
+            2 days
         );
 
         assertEq(vaultFactory.isValidVault(address(0)), false);

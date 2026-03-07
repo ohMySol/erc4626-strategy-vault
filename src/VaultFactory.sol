@@ -28,6 +28,7 @@ contract VaultFactory is IVaultFactory {
         string memory _symbol,
         uint256 _vaultFee,
         address _feeRecipient,
+        uint256 _vaultFeeShare,
         uint256 _timelock
     ) external returns (IVault vault) {
         vault = new Vault(
@@ -37,6 +38,7 @@ contract VaultFactory is IVaultFactory {
             _symbol, 
             _vaultFee, 
             _feeRecipient,
+            _vaultFeeShare,
             _timelock
         );
         
@@ -50,7 +52,8 @@ contract VaultFactory is IVaultFactory {
             _name,
             _symbol,
             _vaultFee,
-            _feeRecipient
+            _feeRecipient,
+            _timelock
         );
     }
 }

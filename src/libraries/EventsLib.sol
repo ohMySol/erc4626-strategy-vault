@@ -14,6 +14,7 @@ library EventsLib {
     /// @param symbol The symbol of the vault.
     /// @param vaultFee The vault fee in basis points.
     /// @param feeRecipient The address of the fee recipient.
+    /// @param timelock The timelock duration in seconds.
     event VaultCreated(
         address indexed vault,
         address indexed creator,
@@ -22,7 +23,8 @@ library EventsLib {
         string name,
         string symbol,
         uint256 vaultFee,
-        address feeRecipient
+        address feeRecipient,
+        uint256 timelock
     );
 
     /// @dev Emitted when the curator is updated.
@@ -61,4 +63,17 @@ library EventsLib {
     /// @param sender The address of the sender.
     /// @param newTimelock The new timelock duration.
     event TimelockSet(address indexed sender, uint256 newTimelock);
+
+    /// @dev Emitted when the last total assets is updated.
+    /// @param newLastTotalAssets The new last total assets.
+    event LastTotalAssetsUpdated(uint256 newLastTotalAssets);
+
+    /// @dev Emitted when the vault fee share is updated.
+    /// @param newVaultFeeShare The new vault fee share in basis points.
+    event VaultFeeShareUpdated(uint256 newVaultFeeShare);
+
+    /// @dev Emitted when the interest is accrued.
+    /// @param newTotalAssets The new total assets.
+    /// @param feeShares The fee shares.
+    event AccrueInterest(uint256 newTotalAssets, uint256 feeShares);
 }

@@ -18,6 +18,7 @@ interface IVaultFactory {
     /// @param _symbol The symbol of the vault
     /// @param _vaultFee The vault fee in basis points
     /// @param _feeRecipient The address of the fee recipient
+    /// @param _vaultFeeShare The vault fee share from the performance fee in basis points
     /// @param _timelock The timelock duration in seconds
     /// @return vault The newly deployed vault instance
     function createVault(
@@ -27,6 +28,7 @@ interface IVaultFactory {
         string memory _symbol,
         uint256 _vaultFee,
         address _feeRecipient,
+        uint256 _vaultFeeShare,
         uint256 _timelock
     ) external returns (IVault vault);
 }
