@@ -13,6 +13,11 @@ interface IVault {
     /// @notice Performance fee recipient address. Can not be the zero address.
     function feeRecipient() external view returns (address);
 
+    /// @notice Vault's share of the performance fee (the rest is the strategist pool).
+    /// @dev This fee share is deducted from the performance fee and sent to `feeRecipient`.
+    /// There is no limit on fee share for vault, so it is up to the vault owner to set it.
+    function vaultFeeShare() external view returns (uint96);
+
     /// @notice Address of the curator.
     function curator() external view returns (address);
 
@@ -28,20 +33,24 @@ interface IVault {
     /// @notice Pending `newTimelock` duration and `validAt` timestamp when it becomes valid.
     function pendingTimelock() external view returns (uint192 pendingTimelock, uint64 validAt);
 
+    /// @notice Total amount of lost assets due to failed strategies.
+    function lostAssets() external view returns (uint256);
+
+    /// @notice Last total assets of the vault before the last accrual.
+    function lastTotalAssets() external view returns (uint256);
+
     /// @notice Configuration of a strategy connected to the vault.
     /// @param strategy The address of the strategy.
     /// @return cap The maximum asset allocation for the strategy.
     /// @return enabled Whether the strategy is enabled or not.
     /// @return proposed Whether the strategy is proposed or not (means it's waiting for approval).
     /// @return lastAccrualTimestamp The timestamp of the last accrual.
-    /// @return strategyOwnerFeeBPS The percentage of performance fee that goes to the strategy owner.
     /// @return lastTotalAssets The most recent total assets of the strategy.
     function strategyConfig(address strategy) external view returns (
         uint184 cap,
         bool enabled,
         bool proposed,
         uint64 lastAccrualTimestamp,
-        uint96 strategyOwnerFeeBPS,
         uint256 lastTotalAssets
     );
 
@@ -152,21 +161,35 @@ interface IVault {
     /// @param newFeeRecipient The new performance fee recipient address.
     function setFeeRecipient(address newFeeRecipient) external;
 
-    /// TODO: AWAITS FINISHING NATSPEC
+    /// @notice Sets the vault's share of the performance fee (the rest is the strategist pool).
+    /// @dev Only the owner can call this function. 
+    /// IMPORTANT: 
+    /// - If `newVaultFeeShare` value is greater than `MAX_VAULT_FEE_SHARE_BPS`, the function will revert.
+    /// - If the current `vaultFeeShare` is equal to the `newVaultFeeShare`, the function will revert.
+    ///
+    /// @param newVaultFeeShare The new vault's share of the performance fee in basis points.
+    function setVaultFeeShare(uint256 newVaultFeeShare) external;
+
     /// @notice Accepts the pending guardian after the timelock has elapsed.
     /// @dev Can be called by anyone.
     function acceptGuardian() external;
 
-    /// TODO: AWAITS FINISHING NATSPEC
-    /// @notice Accepts a pending timelock decrease after the timelock has elapsed.
+    /// @notice Accepts a pending timelock.
     /// @dev Can be called by anyone.
+    /// IMPORTANT: 
+    /// - New timelock must not be greated than the MAX_TIMELOCK.
+    /// - New timelock must not be less than the MIN_TIMELOCK.
     function acceptTimelock() external;
 
-    /// TODO: AWAITS FINISHING NATSPEC
-    /// @notice Guardian can revoke a pending guardian change.
+    /// @notice Revokes a pending guardian.
+    /// @dev Can be called only by address with guardian role.
+    /// IMPORTANT: 
+    /// - If there is no pending guardian, the function will revert.
     function revokePendingGuardian() external;
 
-    /// TODO: AWAITS FINISHING NATSPEC
-    /// @notice Guardian can revoke a pending timelock change.
+    /// @notice Revokes a pending timelock.
+    /// @dev Can be called only by address with guardian role.
+    /// IMPORTANT: 
+    /// - If there is no pending timelock, the function will revert.
     function revokePendingTimelock() external;
 }

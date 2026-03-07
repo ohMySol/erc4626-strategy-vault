@@ -1,11 +1,16 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.30;
 
-import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import {IERC4626,ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {
+    IERC4626,
+    ERC4626,
+    ERC20,
+    IERC20,
+    SafeERC20,
+    Math
+} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
+
 import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
-import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 
@@ -40,7 +45,8 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
     using SafeERC20 for IERC20;
     using PendingLib for PendingUint192;
     using PendingLib for PendingAddress;
-
+    using Math for uint256;
+    
     /* STORAGE */
 
     /// @inheritdoc IVault
@@ -48,6 +54,9 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
     
     /// @inheritdoc IVault
     address public feeRecipient; 
+
+    /// @inheritdoc IVault
+    uint96 public vaultFeeShare;
 
     /// @inheritdoc IVault
     address public curator;
@@ -63,6 +72,12 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
 
     /// @inheritdoc IVault
     PendingUint192 public pendingTimelock;
+
+    /// @inheritdoc IVault
+    uint256 public lostAssets;
+
+    /// @inheritdoc IVault
+    uint256 public lastTotalAssets;
 
     /// @dev List of strategies currently included in the vault.
     address[] internal _strategies;
@@ -100,6 +115,7 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
     /// @param _symbol The symbol of the vault 
     /// @param _vaultFee The vault fee in basis points
     /// @param _feeRecipient The address of the fee recipient
+    /// @param _vaultFeeShare The vault fee share in basis points
     /// @param _timelock The timelock duration in seconds
     constructor(
         address _owner,
@@ -108,6 +124,7 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
         string memory _symbol,
         uint256 _vaultFee,
         address _feeRecipient,
+        uint256 _vaultFeeShare,
         uint256 _timelock
     )
      ERC4626(IERC20(_asset)) 
@@ -117,11 +134,13 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
         if (_asset == address(0)) revert ErrorsLib.ZeroAddress();
         if (_feeRecipient == address(0)) revert ErrorsLib.ZeroAddress();
         if (_vaultFee > ConstantsLib.MAX_FEE) revert ErrorsLib.InvalidFeeBPS();
-
+        if (_vaultFeeShare > ConstantsLib.MAX_VAULT_FEE_SHARE_BPS) revert ErrorsLib.InvalidVaultFeeShare();
+        if (_timelock > 0) _checkTimelockBounds(_timelock);
+        
+        _setTimelock(_timelock);
         fee = uint96(_vaultFee);
         feeRecipient = _feeRecipient;
-
-        _checkAndSetTimelock(_timelock);
+        vaultFeeShare = uint96(_vaultFeeShare);
     }
 
     /* ERC4626 (PUBLIC) */
@@ -261,14 +280,15 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
 
     /// @inheritdoc IVault
     function submitTimelock(uint256 newTimelock) external onlyOwner {
-        if (newTimelock == 0) revert ErrorsLib.InvalidTimelock();
+        if (newTimelock == timelock) revert ErrorsLib.AlreadySet();
         if (pendingTimelock.validAt != 0) revert ErrorsLib.PendingTimelockExists();
-        
+        _checkTimelockBounds(newTimelock);
+
         if (newTimelock >= timelock) {
             // If the new timelock greater than the current timelock, set it immediately
-            _checkAndSetTimelock(newTimelock);
+            _setTimelock(newTimelock);
         } else {
-            // Safe cast to uint192 due to the of validation in `_checkAndSetTimelock` function
+            // Safe cast to uint192 due to the of validation in `_setTimelock` function
             pendingTimelock.update(uint192(newTimelock), timelock);
             emit EventsLib.TimelockSubmitted(newTimelock);
         }
@@ -294,6 +314,16 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
         emit EventsLib.FeeRecipientUpdated(newFeeRecipient);
     }
 
+    /// @inheritdoc IVault
+    function setVaultFeeShare(uint256 newVaultFeeShare) external onlyOwner {
+        if (newVaultFeeShare > ConstantsLib.MAX_VAULT_FEE_SHARE_BPS) revert ErrorsLib.InvalidVaultFeeShare();
+        if (newVaultFeeShare == vaultFeeShare) revert ErrorsLib.AlreadySet();
+        
+        vaultFeeShare = uint96(newVaultFeeShare);
+        
+        emit EventsLib.VaultFeeShareUpdated(newVaultFeeShare);
+    }
+
     /* EXTERNAL FUNCTIONS */
 
     /// @inheritdoc IVault
@@ -303,7 +333,7 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
 
     /// @inheritdoc IVault
     function acceptTimelock() external afterTimelock(pendingTimelock.validAt) {
-        _checkAndSetTimelock(pendingTimelock.value);
+        _setTimelock(pendingTimelock.value);
     }
 
     /* ONLY GUARDIAN FUNCTIONS */
@@ -367,13 +397,9 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
     /// @notice Checks if the new timelock duration is valid and sets it.
     /// @dev Set `timelock` to `newTimelock` and delete `pendingTimelock`.
     /// @param newTimelock The new timelock duration in seconds.
-    function _checkAndSetTimelock(uint256 newTimelock) internal {
-        if (newTimelock > ConstantsLib.MAX_TIMELOCK) revert ErrorsLib.MaxTimelockExceeded();
-        if (newTimelock < ConstantsLib.MIN_TIMELOCK) revert ErrorsLib.MinTimelockNotReached();
-
+    function _setTimelock(uint256 newTimelock) internal {
         timelock = newTimelock;
         delete pendingTimelock;
-
         emit EventsLib.TimelockSet(msg.sender, newTimelock);
     }
 
@@ -386,16 +412,113 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
         emit EventsLib.GuardianUpdated(newGuardian);
     }
 
-    /// TODO: AWAITS REFACTORING
+    /// @notice Checks if the new timelock duration is valid.
+    /// @dev If the new timelock duration is greater than the `MAX_TIMELOCK` or less than the `MIN_TIMELOCK`, the function will revert.
+    /// @param newTimelock The new timelock duration in seconds.
+    function _checkTimelockBounds(uint256 newTimelock) internal pure {
+        if (newTimelock > ConstantsLib.MAX_TIMELOCK) revert ErrorsLib.MaxTimelockExceeded();
+        if (newTimelock < ConstantsLib.MIN_TIMELOCK) revert ErrorsLib.MinTimelockNotReached();
+    }
+
+    /* FEE MANAGEMENT FUNCTIONS */
+
+    /// @dev Fee split is "vault-first": vault gets `vaultFeeShare` (e.g. 60%) of the performance fee;
+    /// the remainder is the strategist pool, distributed among strategy owners in proportion to each
+    /// strategy's generated yield. This keeps the vault owner's share fixed regardless of how many strategies exist.
     function _accrueInterest() internal {
         _accrueFeeAndAssets();
     }
 
-    /// TODO: AWAITS REFACTORING
-    function _accrueFeeAndAssets() internal {}
+    /// @notice Updates the `lastTotalAssets` value.
+    /// @dev Set `lastTotalAssets` to `newTotalAssets`.
+    /// @param newTotalAssets The new total assets.
+    function _updateLastTotalAssets(uint256 newTotalAssets) internal {
+        lastTotalAssets = newTotalAssets;
+        emit EventsLib.LastTotalAssetsUpdated(newTotalAssets);
+    }
 
-    /// TODO: AWAITS REFACTORING
-    function _updateStrategySnapshots() internal {}
+    /// @notice Computes performance fee on yield. Vault gets `vaultFeeShare` of the fee, strategists share the rest by yield.
+    /// @dev Guarantees the vault owner a fixed share of fees regardless of how many strategies exist.
+    /// Workflow:
+    /// 1. Update lost assets
+    /// 2. Update total assets
+    /// 3. Compute performance fee on yield
+    /// 4. Get vault fee shares from performance fee and mint respective shares to `feeRecipient`
+    /// 5. Compute per-strategy yields, update snapshots, and sum total strategy yield
+    /// 6. Get strategies fee shares from performance fee and mint respective shares to strategy owners
+    function _accrueFeeAndAssets() internal {
+        uint256 currentTotalAssets = totalAssets();
+        uint256 newLostAssets = lostAssets;
+        
+        if (currentTotalAssets < lastTotalAssets - lostAssets) {
+            // if there are any lost assets, update the lost assets
+            newLostAssets = lastTotalAssets - currentTotalAssets;
+        }
+        // if no lost assets, then the `lostAssets` remains the same
+        lostAssets = newLostAssets;
+        
+        uint256 newTotalAssets = currentTotalAssets + newLostAssets;
+        uint256 totalInterest = newTotalAssets - lastTotalAssets;
+        _updateLastTotalAssets(newTotalAssets);
+
+        if (totalInterest != 0 && fee != 0) {
+            // Get performance fee in assets --> convert to shares --> get vault fee shares --> mint respective shares to `feeRecipient`
+            uint256 feeAssets = totalInterest.mulDiv(fee, ConstantsLib.BPS);
+            uint256 feeShares = _convertToShares(feeAssets, Math.Rounding.Floor);
+            uint256 vaultFeeShares = feeShares.mulDiv(vaultFeeShare, ConstantsLib.BPS);
+            if (vaultFeeShares > 0) {
+                _mint(feeRecipient, vaultFeeShares);
+            }
+
+            // Compute per-strategy yields, update snapshots, and sum total strategy yield
+            uint256 len = _strategies.length;
+            uint256[] memory strategyYields = new uint256[](len);
+            uint256 totalStrategyYield = 0;
+
+            for (uint256 i = 0; i < len; ) {
+                address strategy = _strategies[i];
+                StrategyConfig storage config = strategyConfig[strategy];
+
+                if (!config.enabled) {
+                    unchecked { ++i; }
+                    continue;
+                }
+
+                uint256 strategyLastTotalAssets = config.lastTotalAssets;
+                uint256 strategyCurrentTotalAssets = IStrategy(strategy).totalAssets();
+                config.lastTotalAssets = strategyCurrentTotalAssets;
+                config.lastAccrualTimestamp = uint64(block.timestamp);
+
+                if (strategyCurrentTotalAssets > strategyLastTotalAssets) {
+                    uint256 yield = strategyCurrentTotalAssets - strategyLastTotalAssets;
+                    strategyYields[i] = yield;
+                    totalStrategyYield += yield;
+                }
+
+                unchecked { ++i; }
+            }
+
+            // `strategiesFeeShares` = performance fee shares left after vault fee. 
+            // E.g vault fee share is 60%, then strategies pool share is 40%
+            uint256 strategiesFeeShares = feeShares - vaultFeeShares;
+            if (strategiesFeeShares > 0 && totalStrategyYield > 0) {
+                for (uint256 i = 0; i < len; ) {
+                    if (strategyYields[i] == 0) {
+                        unchecked { ++i; }
+                        continue;
+                    }
+                    uint256 strategyOwnerShares = strategiesFeeShares.mulDiv(strategyYields[i], totalStrategyYield);
+                    if (strategyOwnerShares > 0) {
+                        address owner = IStrategy(_strategies[i]).strategyOwner();
+                        _mint(owner, strategyOwnerShares);
+                    }
+                    unchecked { ++i; }
+                }
+            }
+    
+            emit EventsLib.LastTotalAssetsUpdated(newTotalAssets);
+        }
+    }
 
     /* ERC4626 (INTERNAL) */
 
