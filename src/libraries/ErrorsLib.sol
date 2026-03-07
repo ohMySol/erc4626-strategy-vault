@@ -49,4 +49,7 @@ library ErrorsLib {
 
     /// @notice Thrown when the storage value is already set.
     error AlreadySet();
+
+    /// @notice Thrown when the vault fee share is not in the valid range (0 to 10_000 bps).
+    error InvalidVaultFeeShare();
 }

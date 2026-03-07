@@ -6,14 +6,12 @@ pragma solidity 0.8.30;
 /// @param enabled Whether the strategy is enabled or not.
 /// @param proposed Whether the strategy is proposed or not (means it's waiting for approval).
 /// @param lastAccrualTimestamp The timestamp of the last accrual.
-/// @param strategyOwnerFeeBPS % of performance fee that goes to strategy owner (e.g. 1000 = 10%).
 /// @param lastTotalAssets The most recent total assets of the strategy.
 struct StrategyConfig {
     uint184 cap;
     bool enabled;
     bool proposed;
     uint64 lastAccrualTimestamp;
-    uint96 strategyOwnerFeeBPS;
     uint256 lastTotalAssets;
 }
 
