@@ -4,13 +4,11 @@ pragma solidity 0.8.30;
 /// @notice A struct to store the configuration of a strategy.
 /// @param cap Max asset allocation for the strategy.
 /// @param enabled Whether the strategy is enabled or not.
-/// @param proposed Whether the strategy is proposed or not (means it's waiting for approval).
 /// @param lastAccrualTimestamp The timestamp of the last accrual.
 /// @param lastTotalAssets The most recent total assets of the strategy.
 struct StrategyConfig {
     uint184 cap;
     bool enabled;
-    bool proposed;
     uint64 lastAccrualTimestamp;
     uint256 lastTotalAssets;
 }

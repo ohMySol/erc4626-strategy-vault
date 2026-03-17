@@ -23,8 +23,8 @@ library ErrorsLib {
     /// @notice Thrown when the sender is not the guardian
     error NotGuardian();
 
-    /// @notice Thrown when the sender is neither the owner nor the curator
-    error NotOwnerOrCurator();
+    /// @notice Thrown when the sender is not the curator
+    error NotCurator();
 
     /// @notice Thrown when trying to act before a timelock has expired
     error TimelockNotElapsed();
@@ -52,4 +52,19 @@ library ErrorsLib {
 
     /// @notice Thrown when the vault fee share is not in the valid range (0 to 10_000 bps).
     error InvalidVaultFeeShare();
+
+    /// @notice Thrown when the strategy is not valid (not connected to the vault or strategy has wrong asset).
+    error InvalidStrategy();
+
+    /// @notice Thrown when the strategy cap is zero.
+    error ZeroStrategyCap();
+
+    /// @notice Thrown when the pending strategy update already exists, and it's not yet accepted.
+    error PendingStrategyExists();
+
+    /// @notice Thrown when the strategy is not enabled.
+    error StrategyNotEnabled();
+
+    /// @notice Thrown when the pending strategy cap update already exists, and it's not yet accepted.
+    error PendingStrategyCapExists();
 }

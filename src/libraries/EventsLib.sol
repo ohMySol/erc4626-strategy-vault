@@ -51,6 +51,16 @@ library EventsLib {
     /// @param newTimelock The new timelock duration.
     event TimelockSubmitted(uint256 newTimelock);
 
+    /// @dev Emitted when the strategy is submitted.
+    /// @param strategy The address of the strategy.
+    /// @param strategyCap The cap of the strategy.
+    event StrategySubmitted(address indexed strategy, uint256 strategyCap);
+
+    /// @dev Emitted when the strategy cap is submitted.
+    /// @param strategy The address of the strategy.
+    /// @param newSupplyCap The new supply cap of the strategy.
+    event StrategyCapSubmitted(address indexed strategy, uint256 newSupplyCap);
+
     /// @dev Emitted when the pending guardian update is revoked.
     /// @param revoker The address of the revoker.
     event PendingGuardianRevoked(address indexed revoker);
@@ -64,6 +74,11 @@ library EventsLib {
     /// @param newTimelock The new timelock duration.
     event TimelockSet(address indexed sender, uint256 newTimelock);
 
+    /// @dev Emitted when the strategy is set.
+    /// @param strategy The address of the strategy.
+    /// @param strategyCap The cap of the strategy.
+    event StrategySet(address indexed strategy, uint256 strategyCap);
+
     /// @dev Emitted when the last total assets is updated.
     /// @param newLastTotalAssets The new last total assets.
     event LastTotalAssetsUpdated(uint256 newLastTotalAssets);
@@ -76,4 +91,9 @@ library EventsLib {
     /// @param newTotalAssets The new total assets.
     /// @param feeShares The fee shares.
     event AccrueInterest(uint256 newTotalAssets, uint256 feeShares);
+
+    /// @dev Emitted when the strategy cap is updated.
+    /// @param strategy The address of the strategy.
+    /// @param newStrategyCap The new strategy cap.
+    event StrategyCapUpdated(address indexed strategy, uint256 newStrategyCap);
 }
