@@ -30,8 +30,22 @@ interface IVault {
     /// @notice Pending `pendingGuardian` address and `validAt` timestamp when it becomes valid.
     function pendingGuardian() external view returns (address pendingGuardian, uint64 validAt);
 
-    /// @notice Pending `newTimelock` duration and `validAt` timestamp when it becomes valid.
+    /// @notice Pending `pendingTimelock` duration and `validAt` timestamp when it becomes valid.
     function pendingTimelock() external view returns (uint192 pendingTimelock, uint64 validAt);
+
+    /// @notice Pending `pendingStrategyCap` value and `validAt` timestamp when it becomes valid.
+    /// @param strategy The address of the strategy.
+    /// @return pendingStrategyCap The pending strategy cap value.
+    /// @return validAt The timestamp when the pending strategy cap becomes valid.
+    function pendingStrategy(address strategy) external view returns (uint192 pendingStrategyCap, uint64 validAt);
+
+    /// @notice Pending `pendingStrategyCap` address and `validAt` timestamp when it becomes valid.
+    /// @dev The difference from the previous `pendingStrategy` is that this is a pending update of the strategy cap,
+    /// while the previous is a pending addition of the strategy.
+    /// @param strategy The address of the strategy.
+    /// @return pendingStrategyCap The pending strategy cap value.
+    /// @return validAt The timestamp when the pending strategy cap becomes valid.
+    function pendingStrategyCap(address strategy) external view returns (uint192 pendingStrategyCap, uint64 validAt);
 
     /// @notice Total amount of lost assets due to failed strategies.
     function lostAssets() external view returns (uint256);
@@ -43,13 +57,11 @@ interface IVault {
     /// @param strategy The address of the strategy.
     /// @return cap The maximum asset allocation for the strategy.
     /// @return enabled Whether the strategy is enabled or not.
-    /// @return proposed Whether the strategy is proposed or not (means it's waiting for approval).
     /// @return lastAccrualTimestamp The timestamp of the last accrual.
     /// @return lastTotalAssets The most recent total assets of the strategy.
     function strategyConfig(address strategy) external view returns (
         uint184 cap,
         bool enabled,
-        bool proposed,
         uint64 lastAccrualTimestamp,
         uint256 lastTotalAssets
     );
@@ -122,6 +134,11 @@ interface IVault {
 
     /// @notice Sets a new curator address.
     /// @dev Only the owner can set a new curator address.
+    /// IMPORTANT: 
+    /// - The `newCurator` address can not be the zero address.
+    /// - The `newCurator` address must be different from the current curator.
+    ///
+    /// @param newCurator The new curator address.
     function setCurator(address newCurator) external;
 
     /// @notice Submits a `newGuardian` address under timelock.
@@ -170,6 +187,32 @@ interface IVault {
     /// @param newVaultFeeShare The new vault's share of the performance fee in basis points.
     function setVaultFeeShare(uint256 newVaultFeeShare) external;
 
+    /// @notice Submits a `strategy` address and `strategyCap` value under timelock.
+    /// @dev Only the curator can call this function.
+    /// IMPORTANT: 
+    /// - The `strategy` address can not be the zero address.
+    /// - The `strategy` address must be connected to the vault.
+    /// - The `strategy` address must be connected to the same asset as the vault.
+    /// - The `strategyCap` value can not be zero.
+    /// - If there is an active pending strategy (means not yet accepted), the function will revert.
+    ///
+    /// @param strategy The address of the strategy.
+    /// @param strategyCap The strategy cap value.
+    function submitStrategy(address strategy, uint256 strategyCap) external;
+
+    /// @notice Submits a `newStrategyCap` value for a `strategy` under timelock.
+    /// @dev Only the curator can call this function. If the `newStrategyCap` value is less than the current strategy cap,
+    /// the function will set the strategy cap immediately. Otherwise, it will submit the new strategy cap under timelock.
+    /// IMPORTANT: 
+    /// - The `strategy` address should be enabled.
+    /// - The `strategyCap` value can not be zero.
+    /// - The `newStrategyCap` value can not be equal to the current strategy cap.
+    /// - If there is an active pending strategy cap (means not yet accepted), the function will revert.
+    ///
+    /// @param strategy The address of the strategy.
+    /// @param newStrategyCap The new strategy cap value.
+    function submitStrategyCap(address strategy, uint256 newStrategyCap) external;
+
     /// @notice Accepts the pending guardian after the timelock has elapsed.
     /// @dev Can be called by anyone.
     function acceptGuardian() external;
@@ -180,6 +223,14 @@ interface IVault {
     /// - New timelock must not be greated than the MAX_TIMELOCK.
     /// - New timelock must not be less than the MIN_TIMELOCK.
     function acceptTimelock() external;
+
+    /// @notice Accepts the pending strategy and its cap after the timelock has elapsed.
+    /// @dev Can be called by anyone.
+    function acceptStrategy(address strategy) external;
+
+    /// @notice Accepts the pending strategy cap after the timelock has elapsed.
+    /// @dev Can be called by anyone.
+    function acceptStrategyCap(address strategy) external;
 
     /// @notice Revokes a pending guardian.
     /// @dev Can be called only by address with guardian role.

@@ -74,6 +74,12 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
     PendingUint192 public pendingTimelock;
 
     /// @inheritdoc IVault
+    mapping (address strategy => PendingUint192) public pendingStrategy;
+
+    /// @inheritdoc IVault
+    mapping (address strategy => PendingUint192) public pendingStrategyCap;
+
+    /// @inheritdoc IVault
     uint256 public lostAssets;
 
     /// @inheritdoc IVault
@@ -83,7 +89,7 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
     address[] internal _strategies;
 
     /// @inheritdoc IVault
-    mapping(address strategy => StrategyConfig) public strategyConfig;
+    mapping (address strategy => StrategyConfig) public strategyConfig;
 
     /* MODIFIERS */
 
@@ -93,9 +99,9 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
         _;
     }
 
-    /// @notice Modifier restrict access only to address with owner or curator role.
-    modifier onlyOwnerOrCurator() {
-        if (msg.sender != owner() && msg.sender != curator) revert ErrorsLib.NotOwnerOrCurator();
+    /// @notice Modifier restrict access only to address with the curator role.
+    modifier onlyCurator() {
+        if (msg.sender != curator) revert ErrorsLib.NotCurator();
         _;
     }
 
@@ -324,6 +330,39 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
         emit EventsLib.VaultFeeShareUpdated(newVaultFeeShare);
     }
 
+    /* ONLY CURATOR FUNCTIONS */
+
+    /// @inheritdoc IVault
+    function submitStrategy(address strategy,  uint256 strategyCap) external onlyCurator {
+        if (strategy == address(0)) revert ErrorsLib.ZeroAddress();
+        if (IStrategy(strategy).vault() != address(this)) revert ErrorsLib.InvalidStrategy();
+        if (IStrategy(strategy).asset() != asset()) revert ErrorsLib.InvalidStrategy();
+        if (strategyCap == 0) revert ErrorsLib.ZeroStrategyCap();
+        if (pendingStrategy[strategy].validAt != 0) revert ErrorsLib.PendingStrategyExists();
+        
+        pendingStrategy[strategy].update(uint192(strategyCap), timelock);
+        
+        emit EventsLib.StrategySubmitted(strategy, strategyCap);
+    }
+
+    /// @inheritdoc IVault
+    function submitStrategyCap(address strategy, uint256 newStrategyCap) external onlyCurator {
+        StrategyConfig storage config = strategyConfig[strategy];
+
+        if (!config.enabled) revert ErrorsLib.StrategyNotEnabled();
+        if (newStrategyCap == 0) revert ErrorsLib.ZeroStrategyCap();
+        if (newStrategyCap == config.cap) revert ErrorsLib.AlreadySet();
+        if (pendingStrategyCap[strategy].validAt != 0) revert ErrorsLib.PendingStrategyCapExists();
+
+        if (newStrategyCap < config.cap) {
+            _setStrategyCap(strategy, newStrategyCap);
+        } else {
+            pendingStrategyCap[strategy].update(uint192(newStrategyCap), timelock);
+
+            emit EventsLib.StrategyCapSubmitted(strategy, newStrategyCap);
+        }
+    }
+
     /* EXTERNAL FUNCTIONS */
 
     /// @inheritdoc IVault
@@ -334,6 +373,16 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
     /// @inheritdoc IVault
     function acceptTimelock() external afterTimelock(pendingTimelock.validAt) {
         _setTimelock(pendingTimelock.value);
+    }
+
+    /// @inheritdoc IVault
+    function acceptStrategy(address strategy) external afterTimelock(pendingStrategy[strategy].validAt) {
+        _setStrategy(strategy, pendingStrategy[strategy].value);
+    }
+
+    /// @inheritdoc IVault
+    function acceptStrategyCap(address strategy) external afterTimelock(pendingStrategy[strategy].validAt) {
+        _setStrategyCap(strategy, pendingStrategy[strategy].value);
     }
 
     /* ONLY GUARDIAN FUNCTIONS */
@@ -410,6 +459,31 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
         guardian = newGuardian;
         delete pendingGuardian;
         emit EventsLib.GuardianUpdated(newGuardian);
+    }
+
+    /// @notice Sets the strategy configuration.
+    /// @dev Set `strategyConfig[strategy].cap` to `strategyCap` and `strategyConfig[strategy].enabled` to `true`.
+    /// After that pushes strategy to the `_strategies` array and deletes the pending strategy.
+    /// @param strategy The address of the strategy.
+    /// @param strategyCap The cap of the strategy.
+    function _setStrategy(address strategy, uint256 strategyCap) internal {
+        strategyConfig[strategy].cap = uint184(strategyCap);
+        strategyConfig[strategy].enabled = true;
+        
+        delete pendingStrategy[strategy];
+        _strategies.push(strategy);
+        
+        emit EventsLib.StrategySet(strategy, strategyCap);
+    }
+
+    /// @notice Sets the strategy cap.
+    /// @dev Set `strategyConfig[strategy].cap` to `newStrategyCap` and delete the pending strategy.
+    /// @param strategy The address of the strategy.
+    /// @param newStrategyCap The new strategy cap.
+    function _setStrategyCap(address strategy, uint256 newStrategyCap) internal {
+        strategyConfig[strategy].cap = uint184(newStrategyCap);
+        delete pendingStrategyCap[strategy];
+        emit EventsLib.StrategyCapUpdated(strategy, newStrategyCap);
     }
 
     /// @notice Checks if the new timelock duration is valid.
