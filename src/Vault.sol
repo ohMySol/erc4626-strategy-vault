@@ -13,6 +13,7 @@ import {
 import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
+import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
 import {ErrorsLib} from "./libraries/ErrorsLib.sol";
 import {EventsLib} from "./libraries/EventsLib.sol";
@@ -46,6 +47,7 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
     using PendingLib for PendingUint192;
     using PendingLib for PendingAddress;
     using Math for uint256;
+    using SafeCast for uint256;
     
     /* STORAGE */
 
@@ -334,13 +336,16 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
 
     /// @inheritdoc IVault
     function submitStrategy(address strategy,  uint256 strategyCap) external onlyCurator {
+        StrategyConfig storage config = strategyConfig[strategy];
+
         if (strategy == address(0)) revert ErrorsLib.ZeroAddress();
+        if (config.enabled) revert ErrorsLib.StrategyAlreadyExists();
         if (IStrategy(strategy).vault() != address(this)) revert ErrorsLib.InvalidStrategy();
         if (IStrategy(strategy).asset() != asset()) revert ErrorsLib.InvalidStrategy();
         if (strategyCap == 0) revert ErrorsLib.ZeroStrategyCap();
         if (pendingStrategy[strategy].validAt != 0) revert ErrorsLib.PendingStrategyExists();
         
-        pendingStrategy[strategy].update(uint192(strategyCap), timelock);
+        pendingStrategy[strategy].update(strategyCap.toUint184(), timelock);
         
         emit EventsLib.StrategySubmitted(strategy, strategyCap);
     }
@@ -355,9 +360,9 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
         if (pendingStrategyCap[strategy].validAt != 0) revert ErrorsLib.PendingStrategyCapExists();
 
         if (newStrategyCap < config.cap) {
-            _setStrategyCap(strategy, newStrategyCap);
+            _setStrategyCap(strategy, newStrategyCap.toUint184());
         } else {
-            pendingStrategyCap[strategy].update(uint192(newStrategyCap), timelock);
+            pendingStrategyCap[strategy].update(newStrategyCap.toUint184(), timelock);
 
             emit EventsLib.StrategyCapSubmitted(strategy, newStrategyCap);
         }
@@ -377,12 +382,12 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
 
     /// @inheritdoc IVault
     function acceptStrategy(address strategy) external afterTimelock(pendingStrategy[strategy].validAt) {
-        _setStrategy(strategy, pendingStrategy[strategy].value);
+        _setStrategy(strategy, uint184(pendingStrategy[strategy].value));
     }
 
     /// @inheritdoc IVault
-    function acceptStrategyCap(address strategy) external afterTimelock(pendingStrategy[strategy].validAt) {
-        _setStrategyCap(strategy, pendingStrategy[strategy].value);
+    function acceptStrategyCap(address strategy) external afterTimelock(pendingStrategyCap[strategy].validAt) {
+        _setStrategyCap(strategy, uint184(pendingStrategyCap[strategy].value));
     }
 
     /* ONLY GUARDIAN FUNCTIONS */
@@ -462,16 +467,21 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
     }
 
     /// @notice Sets the strategy configuration.
-    /// @dev Set `strategyConfig[strategy].cap` to `strategyCap` and `strategyConfig[strategy].enabled` to `true`.
-    /// After that pushes strategy to the `_strategies` array and deletes the pending strategy.
+    /// @dev Initialize the strategy configuration and push it to the `_strategies` array.
     /// @param strategy The address of the strategy.
     /// @param strategyCap The cap of the strategy.
-    function _setStrategy(address strategy, uint256 strategyCap) internal {
-        strategyConfig[strategy].cap = uint184(strategyCap);
-        strategyConfig[strategy].enabled = true;
+    function _setStrategy(address strategy, uint184 strategyCap) internal {
+        StrategyConfig storage config = strategyConfig[strategy];
+
+        config.cap = strategyCap;
+        config.enabled = true;
+        // Initialize strategy snapshots so first accrual doesn't treat principal as yield.
+        config.lastTotalAssets = IStrategy(strategy).totalAssets();
+        config.lastAccrualTimestamp = uint64(block.timestamp);
         
         delete pendingStrategy[strategy];
-        _strategies.push(strategy);
+        // Duplicates avoided during the duplicate check in `submitStrategy` function
+        _strategies.push(strategy); 
         
         emit EventsLib.StrategySet(strategy, strategyCap);
     }
@@ -480,8 +490,8 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
     /// @dev Set `strategyConfig[strategy].cap` to `newStrategyCap` and delete the pending strategy.
     /// @param strategy The address of the strategy.
     /// @param newStrategyCap The new strategy cap.
-    function _setStrategyCap(address strategy, uint256 newStrategyCap) internal {
-        strategyConfig[strategy].cap = uint184(newStrategyCap);
+    function _setStrategyCap(address strategy, uint184 newStrategyCap) internal {
+        strategyConfig[strategy].cap = newStrategyCap;
         delete pendingStrategyCap[strategy];
         emit EventsLib.StrategyCapUpdated(strategy, newStrategyCap);
     }
@@ -590,7 +600,6 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
                 }
             }
     
-            emit EventsLib.LastTotalAssetsUpdated(newTotalAssets);
         }
     }
 

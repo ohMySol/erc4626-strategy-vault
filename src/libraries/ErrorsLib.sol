@@ -67,4 +67,7 @@ library ErrorsLib {
 
     /// @notice Thrown when the pending strategy cap update already exists, and it's not yet accepted.
     error PendingStrategyCapExists();
+
+    /// @notice Thrown when trying to submit a strategy that already exists.
+    error StrategyAlreadyExists();
 }

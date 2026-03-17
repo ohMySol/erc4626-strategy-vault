@@ -190,6 +190,7 @@ interface IVault {
     /// @notice Submits a `strategy` address and `strategyCap` value under timelock.
     /// @dev Only the curator can call this function.
     /// IMPORTANT: 
+    /// - The `strategy` should be unique (no duplicates).
     /// - The `strategy` address can not be the zero address.
     /// - The `strategy` address must be connected to the vault.
     /// - The `strategy` address must be connected to the same asset as the vault.
