@@ -79,4 +79,7 @@ library ErrorsLib {
 
     /// @notice Thrown when the strategy is already in the queue.
     error StrategyAlreadyInQueue();
+
+    /// @notice Thrown when all the strategy caps are reached during the assets allocation.
+    error AllCapsReached();
 }

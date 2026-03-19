@@ -638,6 +638,60 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
         if (newTimelock < ConstantsLib.MIN_TIMELOCK) revert ErrorsLib.MinTimelockNotReached();
     }
 
+    /* LIQUIDITY ALLOCATION */
+    
+    /// @notice Supplies `assets` to the appropriate strategy using the supply queue.
+    /// @dev Routes the assets to the appropriate strategy using the supply queue and updates the `lastTotalAssets` value.
+    /// @param assets The amount of assets to supply.
+    function _supplyToStrategy(uint256 assets) internal {
+        uint256 length = _supplyQueue.length;
+
+        for (uint256 i = 0; i < length && assets > 0; ) {
+            address strategy = _supplyQueue[i];
+            StrategyConfig storage config = strategyConfig[strategy];
+            
+            if (!config.enabled) { 
+                unchecked {++i;}
+                continue;
+            }
+
+            uint256 strategyAssets = IStrategy(strategy).totalAssets();
+            uint256 remainingCap = config.cap - strategyAssets;
+            
+            if (remainingCap > 0) {
+                uint256 toSupply = assets > remainingCap ? remainingCap : assets;
+                
+                try IStrategy(strategy).deposit(toSupply) {
+                    config.lastTotalAssets = IStrategy(strategy).totalAssets();
+                    assets -= toSupply;
+                } catch {}
+            }
+            unchecked {++i;}
+        }
+        // If there are any remaining assets, it means that all the strategy caps are reached.
+        if (assets != 0) revert ErrorsLib.AllCapsReached();
+    }
+
+    // TODO
+    function _withdrawFromStrategy(uint256 assets) internal {}
+
+    /* ERC4626 (INTERNAL) */
+
+    /// @inheritdoc ERC4626
+    /// @dev Used in `deposit`, `depositWithPermit`, `mint`, `mintWithPermit` functions to deposit underlying asset to vault strategies.
+    /// Routes the assets to the appropriate strategy using the supply queue and updates the `lastTotalAssets` value.
+    function _deposit(address caller, address receiver, uint256 assets, uint256 shares) internal override {
+        super._deposit(caller, receiver, assets, shares);
+        _supplyToStrategy(assets);
+        _updateLastTotalAssets(lastTotalAssets + assets);
+    }
+
+    // TODO
+    /// @inheritdoc ERC4626
+    /// @dev Used in `withdraw`, `redeem` functions to withdraw underlying asset from vault strategies.
+    /// Routes the assets to the appropriate strategy using the withdraw queue and updates the `lastTotalAssets` value.
+    function _withdraw(address caller, address receiver, address owner, uint256 assets, uint256 shares) internal override {}
+
     /* FEE MANAGEMENT FUNCTIONS */
 
     /// @dev Fee split is "vault-first": vault gets `vaultFeeShare` (e.g. 60%) of the performance fee;
