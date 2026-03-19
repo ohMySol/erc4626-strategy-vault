@@ -214,6 +214,37 @@ interface IVault {
     /// @param newStrategyCap The new strategy cap value.
     function submitStrategyCap(address strategy, uint256 newStrategyCap) external;
 
+    /// @notice Sets the supply queue.
+    /// @dev Only the curator can call this function.
+    /// IMPORTANT: 
+    /// - The `newSupplyQueue` length can not be greater than the `MAX_QUEUE_LENGTH`.
+    /// - The `newSupplyQueue` can not contain the zero address.
+    /// - The `newSupplyQueue` can not contain the disabled strategy.
+    ///
+    /// @param newSupplyQueue The new supply queue.
+    function setSupplyQueue(address[] calldata newSupplyQueue) external;
+
+    /// @notice Sets the withdraw queue.
+    /// @dev Only the curator can call this function.
+    /// IMPORTANT: 
+    /// - The `newWithdrawQueue` length can not be greater than the `MAX_QUEUE_LENGTH`.
+    /// - The `newWithdrawQueue` can not contain the zero address.
+    /// - The `newWithdrawQueue` can not contain the disabled strategy.
+    ///
+    /// @param newWithdrawQueue The new withdraw queue.
+    function setWithdrawQueue(address[] calldata newWithdrawQueue) external;
+
+    /// @notice Disables a strategy.
+    /// @dev Only the curator can call this function. During the disabling process, all remaining assets are
+    /// withdrawn back to the vault, the strategy cap is set to zero, and the strategy is removed from the supply and withdraw queues,
+    /// if any pending changes exist they are revoked and the global snapshot is updated to reflect the new total assets balance.
+    /// The `lostAssets` is updated to reflect the amount of assets that were lost due to the strategy being disabled.
+    /// IMPORTANT: 
+    /// - The `strategy` must be enabled.
+    ///
+    /// @param strategy The address of the strategy to disable.
+    function disableStrategy(address strategy) external;
+
     /// @notice Accepts the pending guardian after the timelock has elapsed.
     /// @dev Can be called by anyone.
     function acceptGuardian() external;

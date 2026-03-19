@@ -88,7 +88,18 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
     uint256 public lastTotalAssets;
 
     /// @dev List of strategies currently included in the vault.
+    /// Used as strategies registry.
+    /// Note: Currently the array is unbounded and it can keep a growing number of strategies, because disabled strategies are not removed from the array.
+    /// I am aware of this and will fix that soon.
     address[] internal _strategies;
+
+    /// @dev List of strategies currently in the supply list.
+    /// Used for assets allocation routing.
+    address[] internal _supplyQueue;
+
+    /// @dev List of strategies currently in the withdraw list.
+    /// Used for assets allocation routing.
+    address[] internal _withdrawQueue;
 
     /// @inheritdoc IVault
     mapping (address strategy => StrategyConfig) public strategyConfig;
@@ -280,6 +291,7 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
     function submitGuardian(address newGuardian) external onlyOwner {
         if (newGuardian == address(0)) revert ErrorsLib.ZeroAddress();
         if (newGuardian == guardian) revert ErrorsLib.AlreadySet();
+        if (pendingGuardian.validAt != 0) revert ErrorsLib.PendingGuardianExist();
 
         pendingGuardian.update(newGuardian, timelock);
 
@@ -306,6 +318,10 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
      function setFee(uint256 newFee) external onlyOwner {
         if (newFee == fee) revert ErrorsLib.AlreadySet();
         if (newFee > ConstantsLib.MAX_FEE) revert ErrorsLib.InvalidFeeBPS();
+        
+        // Accrue interest and fee using the old fee before setting the new fee
+        _accrueInterest();
+
         // Safe cast to uint96 due to the above `MAX_FEE` validation
         fee = uint96(newFee);
         
@@ -316,7 +332,10 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
     function setFeeRecipient(address newFeeRecipient) external onlyOwner {
         if (newFeeRecipient == address(0)) revert ErrorsLib.ZeroAddress();
         if (newFeeRecipient == feeRecipient) revert ErrorsLib.AlreadySet();
-
+        
+        // Accrue interest and fee for the previous fee recipient before setting the new fee recipient
+        _accrueInterest();
+        
         feeRecipient = newFeeRecipient;
 
         emit EventsLib.FeeRecipientUpdated(newFeeRecipient);
@@ -327,6 +346,9 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
         if (newVaultFeeShare > ConstantsLib.MAX_VAULT_FEE_SHARE_BPS) revert ErrorsLib.InvalidVaultFeeShare();
         if (newVaultFeeShare == vaultFeeShare) revert ErrorsLib.AlreadySet();
         
+        // Accrue interest and fee for the previous vault fee share before setting the new vault fee share
+        _accrueInterest();
+
         vaultFeeShare = uint96(newVaultFeeShare);
         
         emit EventsLib.VaultFeeShareUpdated(newVaultFeeShare);
@@ -339,7 +361,9 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
         StrategyConfig storage config = strategyConfig[strategy];
 
         if (strategy == address(0)) revert ErrorsLib.ZeroAddress();
-        if (config.enabled) revert ErrorsLib.StrategyAlreadyExists();
+        // Checking strategy `enabled` is not enough because the strategy can be disabled and validation will read it as non existent strategy.
+        // And `lastAccrualTimestamp` is used to avoid submitting the same strategy again.
+        if (config.enabled || config.lastAccrualTimestamp != 0) revert ErrorsLib.StrategyAlreadyExists();
         if (IStrategy(strategy).vault() != address(this)) revert ErrorsLib.InvalidStrategy();
         if (IStrategy(strategy).asset() != asset()) revert ErrorsLib.InvalidStrategy();
         if (strategyCap == 0) revert ErrorsLib.ZeroStrategyCap();
@@ -366,6 +390,72 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
 
             emit EventsLib.StrategyCapSubmitted(strategy, newStrategyCap);
         }
+    }
+
+    /// @inheritdoc IVault
+    function setSupplyQueue(address[] calldata newSupplyQueue) external onlyCurator {
+        uint256 length = newSupplyQueue.length;
+        if (length > ConstantsLib.MAX_QUEUE_LENGTH) revert ErrorsLib.MaxQueueLengthExceeded();
+
+        for (uint256 i = 0; i < length;) {
+            address strategy = newSupplyQueue[i];
+            if (strategy == address(0)) revert ErrorsLib.ZeroAddress();
+            if (!strategyConfig[strategy].enabled) revert ErrorsLib.StrategyNotEnabled();
+            unchecked { ++i; }
+        }
+
+        _supplyQueue = newSupplyQueue;
+
+        emit EventsLib.SetSupplyQueue(newSupplyQueue);
+    }
+
+    /// @inheritdoc IVault
+    function setWithdrawQueue(address[] calldata newWithdrawQueue) external onlyCurator {
+        uint256 length = newWithdrawQueue.length;
+        if (length > ConstantsLib.MAX_QUEUE_LENGTH) revert ErrorsLib.MaxQueueLengthExceeded();
+
+        for (uint256 i = 0; i < length;) {
+            address strategy = newWithdrawQueue[i];
+            if (strategy == address(0)) revert ErrorsLib.ZeroAddress();
+            if (!strategyConfig[strategy].enabled) revert ErrorsLib.StrategyNotEnabled();
+            unchecked { ++i; }
+        }
+
+        _withdrawQueue = newWithdrawQueue;
+
+        emit EventsLib.SetWithdrawQueue(newWithdrawQueue);
+    }
+
+    /// @inheritdoc IVault
+    function disableStrategy(address strategy) external onlyCurator {
+        StrategyConfig storage config = strategyConfig[strategy];
+        if (!config.enabled) revert ErrorsLib.StrategyNotEnabled();
+
+        _accrueInterest();
+
+        config.cap = 0;
+        config.enabled = false;
+        config.lastTotalAssets = 0;
+
+        delete pendingStrategy[strategy];
+        delete pendingStrategyCap[strategy];
+
+        _removeFromSupplyQueue(strategy);
+        _removeFromWithdrawQueue(strategy);
+
+        // Withdraw all remaining assets from the strategy
+        uint256 strategyAssets = IStrategy(strategy).totalAssets();
+        if (strategyAssets > 0) {
+            uint256 withdrawnAssets = IStrategy(strategy).withdraw(strategyAssets, address(this));
+            if (withdrawnAssets != strategyAssets) {
+                lostAssets += strategyAssets - withdrawnAssets;
+            }
+        }
+
+        // Update the global snapshot to reflect the new total assets balance.
+        _updateLastTotalAssets(totalAssets());
+
+        emit EventsLib.StrategyDisabled(strategy);
     }
 
     /* EXTERNAL FUNCTIONS */
@@ -404,6 +494,20 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
         if (pendingTimelock.validAt == 0) revert ErrorsLib.NoPendingChange();
         delete pendingTimelock;
         emit EventsLib.PendingTimelockRevoked(msg.sender);
+    }
+
+    /// TODO: natspec in IVault
+    function revokePendingStrategy(address strategy) external onlyGuardian {
+        if (pendingStrategy[strategy].validAt == 0) revert ErrorsLib.NoPendingChange();
+        delete pendingStrategy[strategy];
+        emit EventsLib.PendingStrategyRevoked(msg.sender);
+    }
+
+    /// TODO: natspec in IVault
+    function revokePendingStrategyCap(address strategy) external onlyGuardian {
+        if (pendingStrategyCap[strategy].validAt == 0) revert ErrorsLib.NoPendingChange();
+        delete pendingStrategyCap[strategy];
+        emit EventsLib.PendingStrategyCapRevoked(msg.sender);
     }
 
     /* INTERNAL FUNCTIONS */
@@ -494,6 +598,36 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
         strategyConfig[strategy].cap = newStrategyCap;
         delete pendingStrategyCap[strategy];
         emit EventsLib.StrategyCapUpdated(strategy, newStrategyCap);
+    }
+
+    /// @notice Removes a strategy from the supply queue using swap-and-pop.
+    /// @dev No-op if the strategy is not in the queue.
+    /// @param strategy The address of the strategy to remove.
+    function _removeFromSupplyQueue(address strategy) internal {
+        uint256 len = _supplyQueue.length;
+        for (uint256 i; i < len;) {
+            if (_supplyQueue[i] == strategy) {
+                _supplyQueue[i] = _supplyQueue[len - 1];
+                _supplyQueue.pop();
+                return;
+            }
+            unchecked { ++i; }
+        }
+    }
+
+    /// @notice Removes a strategy from the withdraw queue using swap-and-pop.
+    /// @dev No-op if the strategy is not in the queue.
+    /// @param strategy The address of the strategy to remove.
+    function _removeFromWithdrawQueue(address strategy) internal {
+        uint256 len = _withdrawQueue.length;
+        for (uint256 i; i < len;) {
+            if (_withdrawQueue[i] == strategy) {
+                _withdrawQueue[i] = _withdrawQueue[len - 1];
+                _withdrawQueue.pop();
+                return;
+            }
+            unchecked { ++i; }
+        }
     }
 
     /// @notice Checks if the new timelock duration is valid.
