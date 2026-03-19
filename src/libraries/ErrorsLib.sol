@@ -70,4 +70,13 @@ library ErrorsLib {
 
     /// @notice Thrown when trying to submit a strategy that already exists.
     error StrategyAlreadyExists();
+
+    /// @notice Thrown when the pending guardian update already exists, and it's not yet accepted.
+    error PendingGuardianExist();
+
+    /// @notice Thrown when the queue length is greater than the maximum allowed.
+    error MaxQueueLengthExceeded();
+
+    /// @notice Thrown when the strategy is already in the queue.
+    error StrategyAlreadyInQueue();
 }

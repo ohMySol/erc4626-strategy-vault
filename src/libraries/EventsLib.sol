@@ -69,6 +69,14 @@ library EventsLib {
     /// @param revoker The address of the revoker.
     event PendingTimelockRevoked(address indexed revoker);
 
+    /// @dev Emitted when the pending strategy update is revoked.
+    /// @param revoker The address of the revoker.
+    event PendingStrategyRevoked(address indexed revoker);
+
+    /// @dev Emitted when the pending strategy cap update is revoked.
+    /// @param revoker The address of the revoker.
+    event PendingStrategyCapRevoked(address indexed revoker);
+
     /// @dev Emitted when the timelock is set.
     /// @param sender The address of the sender.
     /// @param newTimelock The new timelock duration.
@@ -96,4 +104,16 @@ library EventsLib {
     /// @param strategy The address of the strategy.
     /// @param newStrategyCap The new strategy cap.
     event StrategyCapUpdated(address indexed strategy, uint256 newStrategyCap);
+
+    /// @dev Emitted when the supply queue is set.
+    /// @param newSupplyQueue The new supply queue.
+    event SetSupplyQueue(address[] indexed newSupplyQueue);
+
+    /// @dev Emitted when the withdraw queue is set.
+    /// @param newWithdrawQueue The new withdraw queue.
+    event SetWithdrawQueue(address[] indexed newWithdrawQueue);
+
+    /// @dev Emitted when a strategy is disabled.
+    /// @param strategy The address of the disabled strategy.
+    event StrategyDisabled(address indexed strategy);
 }

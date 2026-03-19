@@ -19,4 +19,7 @@ library ConstantsLib {
 
     /// @dev BPS denominator (10_000 = 100%).
     uint256 internal constant BPS = 10_000;
+
+    /// @dev Maximum allowed length of the supply and withdraw queues.
+    uint256 internal constant MAX_QUEUE_LENGTH = 10;
 }
