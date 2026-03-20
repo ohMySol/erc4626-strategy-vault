@@ -275,4 +275,20 @@ interface IVault {
     /// IMPORTANT: 
     /// - If there is no pending timelock, the function will revert.
     function revokePendingTimelock() external;
+
+    /// @notice Revokes a pending strategy.
+    /// @dev Can be called only by address with guardian role.
+    /// IMPORTANT: 
+    /// - If there is no pending strategy, the function will revert.
+    ///
+    /// @param strategy The address of the strategy.
+    function revokePendingStrategy(address strategy) external;
+
+    /// @notice Revokes a pending strategy cap.
+    /// @dev Can be called only by address with guardian role.
+    /// IMPORTANT: 
+    /// - If there is no pending strategy cap, the function will revert.
+    ///
+    /// @param strategy The address of the strategy.
+    function revokePendingStrategyCap(address strategy) external;
 }

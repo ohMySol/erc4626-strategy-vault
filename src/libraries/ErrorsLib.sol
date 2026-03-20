@@ -82,4 +82,7 @@ library ErrorsLib {
 
     /// @notice Thrown when all the strategy caps are reached during the assets allocation.
     error AllCapsReached();
+
+    /// @notice Thrown when there is not enough liquidity in strategies to withdraw the requested assets.
+    error NotEnoughLiquidity();
 }

@@ -496,14 +496,14 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
         emit EventsLib.PendingTimelockRevoked(msg.sender);
     }
 
-    /// TODO: natspec in IVault
+    /// @inheritdoc IVault
     function revokePendingStrategy(address strategy) external onlyGuardian {
         if (pendingStrategy[strategy].validAt == 0) revert ErrorsLib.NoPendingChange();
         delete pendingStrategy[strategy];
         emit EventsLib.PendingStrategyRevoked(msg.sender);
     }
 
-    /// TODO: natspec in IVault
+    /// @inheritdoc IVault
     function revokePendingStrategyCap(address strategy) external onlyGuardian {
         if (pendingStrategyCap[strategy].validAt == 0) revert ErrorsLib.NoPendingChange();
         delete pendingStrategyCap[strategy];
@@ -641,7 +641,7 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
     /* LIQUIDITY ALLOCATION */
     
     /// @notice Supplies `assets` to the appropriate strategy using the supply queue.
-    /// @dev Routes the assets to the appropriate strategy using the supply queue and updates the `lastTotalAssets` value.
+    /// @dev Routes the assets to the appropriate strategy using the supply queue and updates the strategies `lastTotalAssets` value.
     /// @param assets The amount of assets to supply.
     function _supplyToStrategy(uint256 assets) internal {
         uint256 length = _supplyQueue.length;
@@ -658,6 +658,7 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
             uint256 strategyAssets = IStrategy(strategy).totalAssets();
             uint256 remainingCap = config.cap - strategyAssets;
             
+            // If the remainingCap will underflow - result to 0, then the strategy cap is reached, and we skip the strategy deposit.
             if (remainingCap > 0) {
                 uint256 toSupply = assets > remainingCap ? remainingCap : assets;
                 
@@ -672,8 +673,39 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
         if (assets != 0) revert ErrorsLib.AllCapsReached();
     }
 
-    // TODO
-    function _withdrawFromStrategy(uint256 assets) internal {}
+    /// @notice Withdraws `assets` from the appropriate strategy using the withdraw queue.
+    /// @dev Fetches assets from the strategies via `_withrawQueue` and updates the strategies `lastTotalAssets` value.
+    /// @param assets The amount of assets to withdraw.
+    function _withdrawFromStrategy(uint256 assets) internal {
+        uint256 length = _withdrawQueue.length;
+
+        for (uint256 i = 0; i < length && assets > 0; ) {
+            address strategy = _withdrawQueue[i];
+            StrategyConfig storage config = strategyConfig[strategy];
+
+            if (!config.enabled) { 
+                unchecked {++i;}
+                continue;
+            }
+
+            uint256 strategyAssets = IStrategy(strategy).totalAssets();
+            if (strategyAssets == 0) {
+                unchecked {++i;}
+                continue;
+            }
+
+            uint256 toWithdraw = assets > strategyAssets ? strategyAssets : assets;
+            try IStrategy(strategy).withdraw(toWithdraw, address(this)) returns (uint256 withdrawn) {
+                config.lastTotalAssets = IStrategy(strategy).totalAssets();
+                assets -= withdrawn;
+            } catch {}
+
+            unchecked {++i;}
+        }
+
+        // If there are any remaining assets, it means that all the strategy balances are zero.
+        if (assets != 0) revert ErrorsLib.NotEnoughLiquidity();
+    }
 
     /* ERC4626 (INTERNAL) */
 
@@ -686,11 +718,21 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
         _updateLastTotalAssets(lastTotalAssets + assets);
     }
 
-    // TODO
     /// @inheritdoc ERC4626
     /// @dev Used in `withdraw`, `redeem` functions to withdraw underlying asset from vault strategies.
     /// Routes the assets to the appropriate strategy using the withdraw queue and updates the `lastTotalAssets` value.
-    function _withdraw(address caller, address receiver, address owner, uint256 assets, uint256 shares) internal override {}
+    function _withdraw(address caller, address receiver, address owner, uint256 assets, uint256 shares) internal override {
+        _updateLastTotalAssets(lastTotalAssets - assets);
+
+        // Take the balance of the vault to see if there are any idle assets to withdraw. If there is not enough idle assets,
+        // then withdraw the remaining assets from the strategies.
+        uint256 idle = IERC20(asset()).balanceOf(address(this));
+        if (idle < assets) {
+            _withdrawFromStrategy(assets - idle);
+        }
+
+        super._withdraw(caller, receiver, owner, assets, shares);
+    }
 
     /* FEE MANAGEMENT FUNCTIONS */
 
