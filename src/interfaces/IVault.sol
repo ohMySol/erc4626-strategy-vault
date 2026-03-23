@@ -190,6 +190,7 @@ interface IVault {
     /// @notice Submits a `strategy` address and `strategyCap` value under timelock.
     /// @dev Only the curator can call this function.
     /// IMPORTANT: 
+    /// - The maximum number of strategies is `MAX_QUEUE_LENGTH`.
     /// - The `strategy` should be unique (no duplicates).
     /// - The `strategy` address can not be the zero address.
     /// - The `strategy` address must be connected to the vault.
@@ -220,6 +221,7 @@ interface IVault {
     /// - The `newSupplyQueue` length can not be greater than the `MAX_QUEUE_LENGTH`.
     /// - The `newSupplyQueue` can not contain the zero address.
     /// - The `newSupplyQueue` can not contain the disabled strategy.
+    /// - The `newSupplyQueue` can not contain the duplicate strategy.
     ///
     /// @param newSupplyQueue The new supply queue.
     function setSupplyQueue(address[] calldata newSupplyQueue) external;
@@ -230,6 +232,7 @@ interface IVault {
     /// - The `newWithdrawQueue` length can not be greater than the `MAX_QUEUE_LENGTH`.
     /// - The `newWithdrawQueue` can not contain the zero address.
     /// - The `newWithdrawQueue` can not contain the disabled strategy.
+    /// - The `newWithdrawQueue` can not contain the duplicate strategy.
     ///
     /// @param newWithdrawQueue The new withdraw queue.
     function setWithdrawQueue(address[] calldata newWithdrawQueue) external;

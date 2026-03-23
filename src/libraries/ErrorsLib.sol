@@ -85,4 +85,10 @@ library ErrorsLib {
 
     /// @notice Thrown when there is not enough liquidity in strategies to withdraw the requested assets.
     error NotEnoughLiquidity();
+
+    /// @notice Thrown when the maximum number of strategies is reached.
+    error MaxStrategiesReached();
+
+    /// @notice Thrown when the strategy is duplicated in the queue.
+    error StrategyDuplicate();
 }

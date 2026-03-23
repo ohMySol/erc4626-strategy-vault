@@ -89,8 +89,7 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
 
     /// @dev List of strategies currently included in the vault.
     /// Used as strategies registry.
-    /// Note: Currently the array is unbounded and it can keep a growing number of strategies, because disabled strategies are not removed from the array.
-    /// I am aware of this and will fix that soon.
+    /// IMPORTANT: Disabled strategies are not removed from the array. The max strategies amount is limited to `MAX_QUEUE_LENGTH`.
     address[] internal _strategies;
 
     /// @dev List of strategies currently in the supply list.
@@ -200,13 +199,10 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
         uint256 len = _strategies.length;
         for (uint256 i = 0; i < len; ) {
             address strategy = _strategies[i];
-            StrategyConfig memory config = strategyConfig[strategy];
-            if (config.enabled) {
+            if (strategyConfig[strategy].enabled) {
                 assetsInVault += IStrategy(strategy).totalAssets();
             }
-            unchecked {
-                ++i;
-            }
+            unchecked {++i;}
         }
 
         return assetsInVault;
@@ -308,7 +304,7 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
             // If the new timelock greater than the current timelock, set it immediately
             _setTimelock(newTimelock);
         } else {
-            // Safe cast to uint192 due to the of validation in `_setTimelock` function
+            // Safe cast to uint192 due to overflows prevention in `_setTimelock` function
             pendingTimelock.update(uint192(newTimelock), timelock);
             emit EventsLib.TimelockSubmitted(newTimelock);
         }
@@ -361,6 +357,7 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
         StrategyConfig storage config = strategyConfig[strategy];
 
         if (strategy == address(0)) revert ErrorsLib.ZeroAddress();
+        if (_strategies.length == ConstantsLib.MAX_QUEUE_LENGTH) revert ErrorsLib.MaxStrategiesReached();
         // Checking strategy `enabled` is not enough because the strategy can be disabled and validation will read it as non existent strategy.
         // And `lastAccrualTimestamp` is used to avoid submitting the same strategy again.
         if (config.enabled || config.lastAccrualTimestamp != 0) revert ErrorsLib.StrategyAlreadyExists();
@@ -394,35 +391,15 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
 
     /// @inheritdoc IVault
     function setSupplyQueue(address[] calldata newSupplyQueue) external onlyCurator {
-        uint256 length = newSupplyQueue.length;
-        if (length > ConstantsLib.MAX_QUEUE_LENGTH) revert ErrorsLib.MaxQueueLengthExceeded();
-
-        for (uint256 i = 0; i < length;) {
-            address strategy = newSupplyQueue[i];
-            if (strategy == address(0)) revert ErrorsLib.ZeroAddress();
-            if (!strategyConfig[strategy].enabled) revert ErrorsLib.StrategyNotEnabled();
-            unchecked { ++i; }
-        }
-
+        _checkQueue(newSupplyQueue);
         _supplyQueue = newSupplyQueue;
-
         emit EventsLib.SetSupplyQueue(newSupplyQueue);
     }
 
     /// @inheritdoc IVault
     function setWithdrawQueue(address[] calldata newWithdrawQueue) external onlyCurator {
-        uint256 length = newWithdrawQueue.length;
-        if (length > ConstantsLib.MAX_QUEUE_LENGTH) revert ErrorsLib.MaxQueueLengthExceeded();
-
-        for (uint256 i = 0; i < length;) {
-            address strategy = newWithdrawQueue[i];
-            if (strategy == address(0)) revert ErrorsLib.ZeroAddress();
-            if (!strategyConfig[strategy].enabled) revert ErrorsLib.StrategyNotEnabled();
-            unchecked { ++i; }
-        }
-
+        _checkQueue(newWithdrawQueue);
         _withdrawQueue = newWithdrawQueue;
-
         emit EventsLib.SetWithdrawQueue(newWithdrawQueue);
     }
 
@@ -440,8 +417,8 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
         delete pendingStrategy[strategy];
         delete pendingStrategyCap[strategy];
 
-        _removeFromSupplyQueue(strategy);
-        _removeFromWithdrawQueue(strategy);
+        _removeFromQueue(strategy, _supplyQueue);
+        _removeFromQueue(strategy, _withdrawQueue);
 
         // Withdraw all remaining assets from the strategy
         uint256 strategyAssets = IStrategy(strategy).totalAssets();
@@ -527,7 +504,7 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
         }
     
         uint256 shares = previewDeposit(assets);
-        super._deposit(owner, receiver, assets, shares);
+        _deposit(owner, receiver, assets, shares);
         
         return shares;
     }
@@ -547,12 +524,12 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
         }
         
         uint256 assets = previewMint(shares);
-        super._deposit(owner, receiver, assets, shares);
+        _deposit(owner, receiver, assets, shares);
         
         return assets;
     }
 
-    /// @notice Checks if the new timelock duration is valid and sets it.
+    /// @notice Sets the timelock duration.
     /// @dev Set `timelock` to `newTimelock` and delete `pendingTimelock`.
     /// @param newTimelock The new timelock duration in seconds.
     function _setTimelock(uint256 newTimelock) internal {
@@ -600,30 +577,16 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
         emit EventsLib.StrategyCapUpdated(strategy, newStrategyCap);
     }
 
-    /// @notice Removes a strategy from the supply queue using swap-and-pop.
+    /// @notice Removes a strategy from the supply/withdraw queue using swap-and-pop.
     /// @dev No-op if the strategy is not in the queue.
     /// @param strategy The address of the strategy to remove.
-    function _removeFromSupplyQueue(address strategy) internal {
-        uint256 len = _supplyQueue.length;
+    /// @param queue The queue to remove the strategy from.
+    function _removeFromQueue(address strategy, address[] storage queue) internal {
+        uint256 len = queue.length;
         for (uint256 i; i < len;) {
-            if (_supplyQueue[i] == strategy) {
-                _supplyQueue[i] = _supplyQueue[len - 1];
-                _supplyQueue.pop();
-                return;
-            }
-            unchecked { ++i; }
-        }
-    }
-
-    /// @notice Removes a strategy from the withdraw queue using swap-and-pop.
-    /// @dev No-op if the strategy is not in the queue.
-    /// @param strategy The address of the strategy to remove.
-    function _removeFromWithdrawQueue(address strategy) internal {
-        uint256 len = _withdrawQueue.length;
-        for (uint256 i; i < len;) {
-            if (_withdrawQueue[i] == strategy) {
-                _withdrawQueue[i] = _withdrawQueue[len - 1];
-                _withdrawQueue.pop();
+            if (queue[i] == strategy) {
+                queue[i] = queue[len - 1];
+                queue.pop();
                 return;
             }
             unchecked { ++i; }
@@ -638,10 +601,31 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
         if (newTimelock < ConstantsLib.MIN_TIMELOCK) revert ErrorsLib.MinTimelockNotReached();
     }
 
+    /// @notice Checks if the new queue (can be supply/withdraw queue) is valid.
+    /// @dev Function iterates over the provided `newQueue` parameter and checks if the queue is valid.
+    /// @param newQueue The new queue to check.
+    function _checkQueue(address[] calldata newQueue) internal view {
+        uint256 length = newQueue.length;
+        if (length > ConstantsLib.MAX_QUEUE_LENGTH) revert ErrorsLib.MaxQueueLengthExceeded();
+
+        for (uint256 i = 0; i < length;) {
+            address strategy = newQueue[i];
+            if (strategy == address(0)) revert ErrorsLib.ZeroAddress();
+            if (!strategyConfig[strategy].enabled) revert ErrorsLib.StrategyNotEnabled();
+
+            for (uint256 j = i + 1; j < length; ) {
+                if (newQueue[j] == strategy) revert ErrorsLib.StrategyDuplicate();
+                unchecked { ++j; }
+            }
+            unchecked { ++i; }
+        }
+    }
+
     /* LIQUIDITY ALLOCATION */
     
     /// @notice Supplies `assets` to the appropriate strategy using the supply queue.
-    /// @dev Routes the assets to the appropriate strategy using the supply queue and updates the strategies `lastTotalAssets` value.
+    /// @dev Routes the assets to the appropriate strategy using the supply queue `_supplyQueue` 
+    /// and updates the strategies `lastTotalAssets` value.
     /// @param assets The amount of assets to supply.
     function _supplyToStrategy(uint256 assets) internal {
         uint256 length = _supplyQueue.length;
@@ -663,7 +647,7 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
                 uint256 toSupply = assets > remainingCap ? remainingCap : assets;
                 
                 try IStrategy(strategy).deposit(toSupply) {
-                    config.lastTotalAssets = IStrategy(strategy).totalAssets();
+                    config.lastTotalAssets = IStrategy(strategy).totalAssets(); // TODO: potential place for improvement. Calling each strategy totalAssets() can be expensive.
                     assets -= toSupply;
                 } catch {}
             }
@@ -703,7 +687,7 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
             unchecked {++i;}
         }
 
-        // If there are any remaining assets, it means that all the strategy balances are zero.
+        // If there are any remaining assets, it means that there is not enough liquidity in strategies.
         if (assets != 0) revert ErrorsLib.NotEnoughLiquidity();
     }
 
@@ -734,6 +718,12 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
         super._withdraw(caller, receiver, owner, assets, shares);
     }
 
+    /// @inheritdoc ERC4626
+    /// @dev Returns the number of decimals to add to the underlying asset's decimals.
+    function _decimalsOffset() internal view virtual override returns (uint8) {
+        return 9;
+    }
+
     /* FEE MANAGEMENT FUNCTIONS */
 
     /// @dev Fee split is "vault-first": vault gets `vaultFeeShare` (e.g. 60%) of the performance fee;
@@ -753,17 +743,46 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
 
     /// @notice Computes performance fee on yield. Vault gets `vaultFeeShare` of the fee, strategists share the rest by yield.
     /// @dev Guarantees the vault owner a fixed share of fees regardless of how many strategies exist.
+    /// In order not to call `totalAssets()` function for each strategy twice (in vault `totalAssets()` and in each strategy `totalAssets()`), 
+    /// the function iterates over all strategies and updates the `currentTotalAssets` one time.
+    /// 
     /// Workflow:
-    /// 1. Update lost assets
-    /// 2. Update total assets
-    /// 3. Compute performance fee on yield
-    /// 4. Get vault fee shares from performance fee and mint respective shares to `feeRecipient`
-    /// 5. Compute per-strategy yields, update snapshots, and sum total strategy yield
-    /// 6. Get strategies fee shares from performance fee and mint respective shares to strategy owners
+    /// 1. Compute vault `currentTotalAssets` and each strategy yield `strategyYields` + their total yield `totalStrategyYield`.
+    /// 2. Update `lostTotalAssets` if any, calculate interest and update `lastTotalAssets`.
+    /// 3. Get vault fee shares from performance fee and mint respective shares to `feeRecipient`
+    /// 4. Get strategies fee shares from performance fee and mint respective shares to strategy owners
     function _accrueFeeAndAssets() internal {
-        uint256 currentTotalAssets = totalAssets();
-        uint256 newLostAssets = lostAssets;
+        // `currentTotalAssets` starts from idle vault balance and will be updated with each strategy's total assets
+        uint256 currentTotalAssets = IERC20(asset()).balanceOf(address(this));
+        uint256 length = _strategies.length;
+        uint256[] memory strategyYields = new uint256[](length);
+        uint256 totalStrategyYield;
+
+        // Iterate over all strategies and update the `currentTotalAssets` and `strategyYields` values
+        for (uint256 i = 0; i < length; ) {
+            address strategy = _strategies[i];
+            StrategyConfig storage config = strategyConfig[strategy];
+
+            if (!config.enabled) { unchecked { ++i; } continue; }
+
+            uint256 currentStrategyAssets = IStrategy(strategy).totalAssets();
+            uint256 lastStrategyAssets = config.lastTotalAssets;
+
+            currentTotalAssets += currentStrategyAssets;
+            config.lastTotalAssets = currentStrategyAssets;
+            config.lastAccrualTimestamp = uint64(block.timestamp);
+
+            if (currentStrategyAssets > lastStrategyAssets) {
+                uint256 yield = currentStrategyAssets - lastStrategyAssets;
+                strategyYields[i] = yield;
+                totalStrategyYield += yield;
+            }
+
+            unchecked { ++i; }
+        }
         
+        uint256 newLostAssets = lostAssets;
+
         if (currentTotalAssets < lastTotalAssets - lostAssets) {
             // if there are any lost assets, update the lost assets
             newLostAssets = lastTotalAssets - currentTotalAssets;
@@ -784,62 +803,24 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
                 _mint(feeRecipient, vaultFeeShares);
             }
 
-            // Compute per-strategy yields, update snapshots, and sum total strategy yield
-            uint256 len = _strategies.length;
-            uint256[] memory strategyYields = new uint256[](len);
-            uint256 totalStrategyYield = 0;
-
-            for (uint256 i = 0; i < len; ) {
-                address strategy = _strategies[i];
-                StrategyConfig storage config = strategyConfig[strategy];
-
-                if (!config.enabled) {
-                    unchecked { ++i; }
-                    continue;
-                }
-
-                uint256 strategyLastTotalAssets = config.lastTotalAssets;
-                uint256 strategyCurrentTotalAssets = IStrategy(strategy).totalAssets();
-                config.lastTotalAssets = strategyCurrentTotalAssets;
-                config.lastAccrualTimestamp = uint64(block.timestamp);
-
-                if (strategyCurrentTotalAssets > strategyLastTotalAssets) {
-                    uint256 yield = strategyCurrentTotalAssets - strategyLastTotalAssets;
-                    strategyYields[i] = yield;
-                    totalStrategyYield += yield;
-                }
-
-                unchecked { ++i; }
-            }
-
             // `strategiesFeeShares` = performance fee shares left after vault fee. 
             // E.g vault fee share is 60%, then strategies pool share is 40%
             uint256 strategiesFeeShares = feeShares - vaultFeeShares;
             if (strategiesFeeShares > 0 && totalStrategyYield > 0) {
-                for (uint256 i = 0; i < len; ) {
-                    if (strategyYields[i] == 0) {
-                        unchecked { ++i; }
-                        continue;
-                    }
+                for (uint256 i = 0; i < length; ) {
+                    if (strategyYields[i] == 0) { unchecked { ++i; } continue; }
+
                     uint256 strategyOwnerShares = strategiesFeeShares.mulDiv(strategyYields[i], totalStrategyYield);
+                    
                     if (strategyOwnerShares > 0) {
                         address owner = IStrategy(_strategies[i]).strategyOwner();
                         _mint(owner, strategyOwnerShares);
                     }
+                    
                     unchecked { ++i; }
                 }
             }
     
         }
-    }
-
-    /* ERC4626 (INTERNAL) */
-
-    /// @inheritdoc ERC4626
-    /// @dev Returns the number of decimals to add to the underlying asset's decimals.
-    function _decimalsOffset() internal view virtual override returns (uint8) {
-        return 9;
-    }
-
-    
+    }    
 }
