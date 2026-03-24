@@ -166,68 +166,64 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
     /// @inheritdoc IERC4626
     /// @dev Can be paused by the owner in case of emergency.
     /// Instead of calling `previewDeposit()` with expensive `totalAssets()` function inside, the function calculates 
-    /// the current total assets inside `_accrueInterest()` function.
+    /// the current total assets inside `_accrueInterest()` function and use it to calculate the shares.
     function deposit(uint256 assets, address receiver) public virtual override whenNotPaused returns (uint256 shares) {
-        uint256 currentTotalAssets = _accrueInterest();
+        _accrueInterest();
 
         uint256 maxAssets = maxDeposit(receiver);
         if (assets > maxAssets) revert ERC4626ExceededMaxDeposit(receiver, assets, maxAssets);
 
-        shares = _convertToSharesWithTotals(assets, totalSupply(), currentTotalAssets, Math.Rounding.Floor);
+        shares = _convertToSharesWithTotals(assets, totalSupply(), lastTotalAssets, Math.Rounding.Floor);
         _deposit(msg.sender, receiver, assets, shares);
     }
 
     /// @inheritdoc IERC4626
     /// @dev Can be paused by the owner in case of emergency.
+    /// Instead of calling `previewMint()` with expensive `totalAssets()` function inside, the function calculates 
+    /// the current total assets inside `_accrueInterest()` function and use it to calculate the assets.
     function mint(uint256 shares, address receiver) public virtual override whenNotPaused returns (uint256 assets) {
-       uint256 currentTotalAssets = _accrueInterest();
+       _accrueInterest();
 
        uint256 maxShares = maxMint(receiver);
        if (shares > maxShares) revert ERC4626ExceededMaxMint(receiver, shares, maxShares);
 
-       assets = _convertToAssetsWithTotals(shares, totalSupply(), currentTotalAssets, Math.Rounding.Ceil);
+       assets = _convertToAssetsWithTotals(shares, totalSupply(), lastTotalAssets, Math.Rounding.Ceil);
        _deposit(msg.sender, receiver, assets, shares);
     }
 
     /// @inheritdoc IERC4626
     /// @dev Can be paused by the owner in case of emergency.
+    /// Instead of calling `previewWithdraw()` with expensive `totalAssets()` function inside, the function calculates 
+    /// the current total assets inside `_accrueInterest()` function and use it to calculate the shares.
     function withdraw(uint256 assets, address receiver, address owner) public virtual override whenNotPaused returns (uint256 shares) {
-        uint256 currentTotalAssets = _accrueInterest();
+        _accrueInterest();
 
-        uint256 maxAssets = maxWithdraw(receiver);
+        uint256 maxAssets = maxWithdraw(owner);
         if (assets > maxAssets) revert ERC4626ExceededMaxWithdraw(receiver, assets, maxAssets);
 
-        shares = _convertToSharesWithTotals(assets, totalSupply(), currentTotalAssets, Math.Rounding.Ceil);
+        shares = _convertToSharesWithTotals(assets, totalSupply(), lastTotalAssets, Math.Rounding.Ceil);
         _withdraw(msg.sender, receiver, owner, assets, shares);
     }
 
     /// @inheritdoc IERC4626
     /// @dev Can be paused by the owner in case of emergency.
+    /// Instead of calling `previewRedeem()` with expensive `totalAssets()` function inside, the function calculates 
+    /// the current total assets inside `_accrueInterest()` function and use it to calculate the assets.
     function redeem(uint256 shares, address receiver, address owner) public virtual override whenNotPaused returns (uint256 assets) {
-        uint256 currentTotalAssets = _accrueInterest();
+        _accrueInterest();
 
         uint256 maxShares = maxRedeem(owner);
         if (shares > maxShares) revert ERC4626ExceededMaxRedeem(owner, shares, maxShares);
 
-        assets = _convertToAssetsWithTotals(shares, totalSupply(), currentTotalAssets, Math.Rounding.Floor);
+        assets = _convertToAssetsWithTotals(shares, totalSupply(), lastTotalAssets, Math.Rounding.Floor);
         _withdraw(msg.sender, receiver, owner, assets, shares);
     }
 
     /// @inheritdoc ERC4626
-    /// @dev Returns the total managed assets including vault's idle funds and strategies balances.
+    /// @dev Returns the total managed assets including vault's idle funds and strategies balances + lost assets.
     function totalAssets() public view virtual override returns (uint256) {
-        uint256 assetsInVault = IERC20(asset()).balanceOf(address(this));
-
-        uint256 len = _strategies.length;
-        for (uint256 i = 0; i < len; ) {
-            address strategy = _strategies[i];
-            if (strategyConfig[strategy].enabled) {
-                assetsInVault += IStrategy(strategy).totalAssets();
-            }
-            unchecked {++i;}
-        }
-
-        return assetsInVault;
+        (uint256 newTotalAssets, , , , , ) = _calculateFeeAndTotals();
+        return newTotalAssets;
     }
 
     /* GASLESS PUBLIC FUNCTIONS */
@@ -244,7 +240,7 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
     ) public virtual whenNotPaused returns (uint256 shares) {
         if (assets == 0) revert ErrorsLib.ZeroAssetsInAmount();
 
-        uint256 currentTotalAssets = _accrueInterest();
+        _accrueInterest();
 
         IERC20Permit(asset()).permit(
             owner, 
@@ -259,7 +255,7 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
         uint256 maxAssets = maxDeposit(receiver);
         if (assets > maxAssets) revert ERC4626ExceededMaxDeposit(receiver, assets, maxAssets);
     
-        shares = _convertToSharesWithTotals(assets, totalSupply(), currentTotalAssets, Math.Rounding.Floor);
+        shares = _convertToSharesWithTotals(assets, totalSupply(), lastTotalAssets, Math.Rounding.Floor);
         _deposit(owner, receiver, assets, shares);
     }
 
@@ -275,12 +271,12 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
     ) public virtual whenNotPaused returns (uint256 assets) {
         if (shares == 0) revert ErrorsLib.ZeroSharesInAmount();
         
-        uint256 currentTotalAssets = _accrueInterest();
+        _accrueInterest();
         
         uint256 maxShares = maxMint(receiver);
         if (shares > maxShares) revert ERC4626ExceededMaxMint(receiver, shares, maxShares);
 
-        assets = _convertToAssetsWithTotals(shares, totalSupply(), currentTotalAssets, Math.Rounding.Ceil);
+        assets = _convertToAssetsWithTotals(shares, totalSupply(), lastTotalAssets, Math.Rounding.Ceil);
 
         IERC20Permit(asset()).permit(
             owner, 
@@ -747,86 +743,125 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
     }
 
     /// @notice Computes performance fee on yield. Vault gets `vaultFeeShare` of the fee, strategists share the rest by yield.
+    /// Updates new `lastTotalAssets` value, `lostAssets` value, and updates each strategy's `lastTotalAssets` and `lastAccrualTimestamp` values.
     /// @dev Guarantees the vault owner a fixed share of fees regardless of how many strategies exist.
-    /// In order not to call `totalAssets()` function for each strategy twice (in vault `totalAssets()` and in each strategy `totalAssets()`), 
-    /// the function iterates over all strategies and updates the `currentTotalAssets` one time.
-    /// @return currentTotalAssets The current total assets.
     /// 
     /// Workflow:
-    /// 1. Compute vault `currentTotalAssets` and each strategy yield `strategyYields` + their total yield `totalStrategyYield`.
-    /// 2. Update `lostTotalAssets` if any, calculate interest and update `lastTotalAssets`.
-    /// 3. Get vault fee shares from performance fee and mint respective shares to `feeRecipient`
-    /// 4. Get strategies fee shares from performance fee and mint respective shares to strategy owners
-    function _accrueInterest() internal returns (uint256 currentTotalAssets) {
-        // `currentTotalAssets` starts from idle vault balance and will be updated with each strategy's total assets
-        currentTotalAssets = IERC20(asset()).balanceOf(address(this));
+    /// 1. Update each strategy's `lastTotalAssets` and `lastAccrualTimestamp` values.
+    /// 2. Update `lostAssets` value if any, and update `lastTotalAssets` value.
+    /// 3. Get vault fee share `vaultFeeShare` from performance fee `feeShares` value and mint respective shares to `feeRecipient`
+    /// 4. Get strategies fee shares `strategiesFeeShares` from performance fee `feeShares` and mint respective shares to strategy owners
+    /// based on their yield `strategyYields` and total yield `totalStrategyYield`.
+    ///
+    /// @return newTotalAssets The current total assets including idle vault balance and strategies balances + lost assets.
+    function _accrueInterest() internal returns () {
+        (
+            uint256 newTotalAssets,
+            uint256 newLostAssets,
+            uint256 totalStrategyYield,
+            uint256[] memory strategyYields,
+            uint256[] memory strategyCurrentAssets,
+            uint256 feeShares
+        ) = _calculateFeeAndTotals();
+    
+        // Write strategy snapshots
         uint256 length = _strategies.length;
-        uint256[] memory strategyYields = new uint256[](length);
-        uint256 totalStrategyYield;
-
-        // Iterate over all strategies and update the `currentTotalAssets` and `strategyYields` values
         for (uint256 i = 0; i < length; ) {
             address strategy = _strategies[i];
             StrategyConfig storage config = strategyConfig[strategy];
+    
+            if (config.enabled) {
+                config.lastTotalAssets = strategyCurrentAssets[i];
+                config.lastAccrualTimestamp = uint64(block.timestamp);
+            }
+    
+            unchecked { ++i; }
+        }
+    
+        // Write global state
+        if (newLostAssets != lostAssets) {
+            lostAssets = newLostAssets;
+        }
+        _updateLastTotalAssets(newTotalAssets);
+    
+        // Mint fee shares
+        if (feeShares > 0) {
+            uint256 vaultFeeShares = feeShares.mulDiv(vaultFeeShare, ConstantsLib.BPS);
+            if (vaultFeeShares > 0) {
+                _mint(feeRecipient, vaultFeeShares);
+            }
+    
+            uint256 strategiesFeeShares = feeShares - vaultFeeShares;
+            if (strategiesFeeShares > 0 && totalStrategyYield > 0) {
+                for (uint256 i = 0; i < length; ) {
+                    if (strategyYields[i] == 0) { unchecked { ++i; } continue; }
+    
+                    uint256 strategyOwnerShares = strategiesFeeShares.mulDiv(strategyYields[i], totalStrategyYield);
+                    if (strategyOwnerShares > 0) {
+                        _mint(IStrategy(_strategies[i]).strategyOwner(), strategyOwnerShares);
+                    }
+    
+                    unchecked { ++i; }
+                }
+            }
+        }
+    }   
+
+    /// @notice Calculates the interest, lost assets, total assets, strategy yields and fee shares.
+    /// @dev Function calculates the above values and returns them in a tuple.
+    ///
+    /// @return newTotalAssets The current total assets including idle vault balance and strategies balances + lost assets.
+    /// @return newLostAssets The new lost assets.
+    /// @return totalStrategyYield The total yield of all strategies.
+    /// @return strategyYields The separate yield of each strategy.
+    /// @return strategyCurrentAssets The current total assets of each strategy.
+    /// @return feeShares The fee shares to be minted to `feeRecipient` and strategy owners.
+    function _calculateFeeAndTotals() internal view returns (
+        uint256 newTotalAssets, 
+        uint256 newLostAssets, 
+        uint256 totalStrategyYield,
+        uint256[] memory strategyYields,
+        uint256[] memory strategyCurrentAssets,
+        uint256 feeShares
+    ) {
+        // Calculate the current total assets including idle vault balance and strategies balances.
+        uint256 currentTotalAssets = IERC20(asset()).balanceOf(address(this));
+        uint256 length = _strategies.length;
+        strategyYields = new uint256[](length);
+
+        for (uint256 i = 0; i < length; ) {
+            address strategy = _strategies[i];
+            StrategyConfig memory config = strategyConfig[strategy];
 
             if (!config.enabled) { unchecked { ++i; } continue; }
 
             uint256 currentStrategyAssets = IStrategy(strategy).totalAssets();
-            uint256 lastStrategyAssets = config.lastTotalAssets;
-
             currentTotalAssets += currentStrategyAssets;
-            config.lastTotalAssets = currentStrategyAssets;
-            config.lastAccrualTimestamp = uint64(block.timestamp);
 
-            if (currentStrategyAssets > lastStrategyAssets) {
-                uint256 yield = currentStrategyAssets - lastStrategyAssets;
+            if (currentStrategyAssets > config.lastTotalAssets) {
+                uint256 yield = currentStrategyAssets - config.lastTotalAssets;
                 strategyYields[i] = yield;
+                // This array is passed t `accrueInterest()` and avoid calling `totalAssets()` function for each strategy twice.
+                strategyCurrentAssets[i] = currentStrategyAssets;
                 totalStrategyYield += yield;
             }
 
             unchecked { ++i; }
         }
-        
+
         uint256 lastLostAssets = lostAssets;
-        uint256 newLostAssets = lastLostAssets;
+        newLostAssets = lastLostAssets;
 
         if (currentTotalAssets < lastTotalAssets - lastLostAssets) {
-            // if there are any lost assets, update the lost assets
             newLostAssets = lastTotalAssets - currentTotalAssets;
-            lostAssets = newLostAssets;
         }
-        
-        uint256 newTotalAssets = currentTotalAssets + newLostAssets;
+
+        newTotalAssets = currentTotalAssets + newLostAssets;
         uint256 totalInterest = newTotalAssets - lastTotalAssets;
-        _updateLastTotalAssets(newTotalAssets);
 
         if (totalInterest != 0 && fee != 0) {
-            // Get performance fee in assets --> convert to shares --> get vault fee shares --> mint respective shares to `feeRecipient`
             uint256 feeAssets = totalInterest.mulDiv(fee, ConstantsLib.BPS);
-            uint256 feeShares = _convertToSharesWithTotals(feeAssets, totalSupply(), currentTotalAssets, Math.Rounding.Floor);
-            uint256 vaultFeeShares = feeShares.mulDiv(vaultFeeShare, ConstantsLib.BPS);
-            if (vaultFeeShares > 0) {
-                _mint(feeRecipient, vaultFeeShares);
-            }
-
-            // `strategiesFeeShares` = performance fee shares left after vault fee. 
-            // E.g vault fee share is 60%, then strategies pool share is 40%
-            uint256 strategiesFeeShares = feeShares - vaultFeeShares;
-            if (strategiesFeeShares > 0 && totalStrategyYield > 0) {
-                for (uint256 i = 0; i < length; ) {
-                    if (strategyYields[i] == 0) { unchecked { ++i; } continue; }
-
-                    uint256 strategyOwnerShares = strategiesFeeShares.mulDiv(strategyYields[i], totalStrategyYield);
-                    
-                    if (strategyOwnerShares > 0) {
-                        address owner = IStrategy(_strategies[i]).strategyOwner();
-                        _mint(owner, strategyOwnerShares);
-                    }
-                    
-                    unchecked { ++i; }
-                }
-            }
-    
+            feeShares = _convertToSharesWithTotals(feeAssets, totalSupply(), newTotalAssets - feeAssets, Math.Rounding.Floor);
         }
-    }    
+    }
 }
