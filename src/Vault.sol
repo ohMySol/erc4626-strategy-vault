@@ -164,6 +164,36 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
     /* ERC4626 (PUBLIC) */
 
     /// @inheritdoc IERC4626
+    function maxDeposit(address) public view override returns (uint256 maxAssets) {
+        maxAssets = _maxDeposit();
+    }
+
+    /// @inheritdoc IERC4626
+    /// @dev Convert suppliable assets to shares with fee-aware totals.
+    function maxMint(address) public view override returns (uint256 maxShares) {
+        uint256 suppliable = _maxDeposit();
+
+        (uint256 newTotalAssets,,,,, uint256 feeShares) = _calculateFeeAndTotals();
+        uint256 newTotalSupply = totalSupply() + feeShares;
+
+        maxShares = _convertToSharesWithTotals(suppliable, newTotalSupply, newTotalAssets, Math.Rounding.Floor);
+    }
+
+    /// @inheritdoc IERC4626
+    function maxWithdraw(address owner) public view override returns (uint256 maxAssets) {
+        (uint256 assets,,) = _maxWithdraw(owner);
+        maxAssets = assets;
+    }
+
+    /// @inheritdoc IERC4626
+    function maxRedeem(address owner) public view override returns (uint256 maxShares) {
+        (uint256 assets, uint256 newTotalSupply, uint256 newTotalAssets) = _maxWithdraw(owner);
+        if (assets == 0) return 0;
+
+        maxShares = _convertToSharesWithTotals(assets, newTotalSupply, newTotalAssets, Math.Rounding.Floor);
+    }
+
+    /// @inheritdoc IERC4626
     /// @dev Can be paused by the owner in case of emergency.
     /// Instead of calling `previewDeposit()` with expensive `totalAssets()` function inside, the function calculates 
     /// the current total assets inside `_accrueInterest()` function and use it to calculate the shares.
@@ -199,7 +229,7 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
         _accrueInterest();
 
         uint256 maxAssets = maxWithdraw(owner);
-        if (assets > maxAssets) revert ERC4626ExceededMaxWithdraw(receiver, assets, maxAssets);
+        if (assets > maxAssets) revert ERC4626ExceededMaxWithdraw(owner, assets, maxAssets);
 
         shares = _convertToSharesWithTotals(assets, totalSupply(), lastTotalAssets, Math.Rounding.Ceil);
         _withdraw(msg.sender, receiver, owner, assets, shares);
@@ -624,10 +654,7 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
             address strategy = _supplyQueue[i];
             StrategyConfig storage config = strategyConfig[strategy];
             
-            if (!config.enabled) { 
-                unchecked {++i;}
-                continue;
-            }
+            if (!config.enabled) { unchecked {++i;} continue; }
 
             uint256 strategyAssets = IStrategy(strategy).totalAssets();
             uint256 remainingCap = config.cap - strategyAssets;
@@ -657,16 +684,10 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
             address strategy = _withdrawQueue[i];
             StrategyConfig storage config = strategyConfig[strategy];
 
-            if (!config.enabled) { 
-                unchecked {++i;}
-                continue;
-            }
+            if (!config.enabled) { unchecked {++i;} continue; }
 
             uint256 strategyAssets = IStrategy(strategy).totalAssets();
-            if (strategyAssets == 0) {
-                unchecked {++i;}
-                continue;
-            }
+            if (strategyAssets == 0) { unchecked {++i;} continue; }
 
             uint256 toWithdraw = assets > strategyAssets ? strategyAssets : assets;
             try IStrategy(strategy).withdraw(toWithdraw, address(this)) returns (uint256 withdrawn) {
@@ -681,7 +702,66 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
         if (assets != 0) revert ErrorsLib.NotEnoughLiquidity();
     }
 
+    /// @dev Simulates the withdraw path (idle first, then `_withdrawQueue` in order) and returns
+    /// how many of the requested `assets` cannot be covered — the liquidity gap.
+    /// Returns 0 when the full amount is coverable.
+    function _withdrawalLiquidityGap(uint256 assets) internal view returns (uint256 remaining) {
+        if (assets == 0) return 0;
+
+        remaining = assets;
+
+        uint256 idle = IERC20(asset()).balanceOf(address(this));
+        remaining -= idle > remaining ? remaining : idle;
+
+        uint256 length = _withdrawQueue.length;
+        for (uint256 i = 0; i < length && remaining > 0; ) {
+            address strategy = _withdrawQueue[i];
+
+            if (!strategyConfig[strategy].enabled) { unchecked { ++i; } continue; }
+
+            uint256 available = IStrategy(strategy).totalAssets();
+            remaining -= available > remaining ? remaining : available;
+
+            unchecked { ++i; }
+        }
+    }
+
     /* ERC4626 (INTERNAL) */
+
+    /// @dev Returns the maximum depositable assets based on remaining supply queue cap headroom.
+    function _maxDeposit() internal view returns (uint256 suppliable) {
+        uint256 length = _supplyQueue.length;
+        
+        for (uint256 i = 0; i < length; ) {
+            address strategy = _supplyQueue[i];
+            StrategyConfig memory config = strategyConfig[strategy];
+
+            if (!config.enabled || config.cap == 0) { unchecked {++i;} continue; }
+
+            uint256 strategyAssets = IStrategy(strategy).totalAssets();
+            
+            // yield can push strategyAssets above cap; treat as zero headroom (no underflow).
+            if (strategyAssets >= config.cap) { unchecked {++i;} continue; }
+
+            unchecked {
+                suppliable += config.cap - strategyAssets;
+                ++i;
+            }
+        }
+    }
+
+    /// @dev Returns the maximum withdrawable assets for `owner`, capped by real liquidity along the withdraw path.
+    /// Also returns the fee-preview totals so `maxRedeem` can reuse them without a second `_calculateFeeAndTotals` call.
+    function _maxWithdraw(address owner) internal view returns (uint256 assets, uint256 newTotalSupply, uint256 newTotalAssets) {
+        uint256 feeShares;
+        (newTotalAssets, , , , , feeShares) = _calculateFeeAndTotals();
+        newTotalSupply = totalSupply() + feeShares;
+
+        assets = _convertToAssetsWithTotals(balanceOf(owner), newTotalSupply, newTotalAssets, Math.Rounding.Floor);
+
+        uint256 liquidityGap = _withdrawalLiquidityGap(assets);
+        assets -= liquidityGap;
+    }
 
     /// @inheritdoc ERC4626
     /// @dev Used in `deposit`, `depositWithPermit`, `mint`, `mintWithPermit` functions to deposit underlying asset to vault strategies.
@@ -752,9 +832,7 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
     /// 3. Get vault fee share `vaultFeeShare` from performance fee `feeShares` value and mint respective shares to `feeRecipient`
     /// 4. Get strategies fee shares `strategiesFeeShares` from performance fee `feeShares` and mint respective shares to strategy owners
     /// based on their yield `strategyYields` and total yield `totalStrategyYield`.
-    ///
-    /// @return newTotalAssets The current total assets including idle vault balance and strategies balances + lost assets.
-    function _accrueInterest() internal returns () {
+    function _accrueInterest() internal {
         (
             uint256 newTotalAssets,
             uint256 newLostAssets,
@@ -836,13 +914,13 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
             if (!config.enabled) { unchecked { ++i; } continue; }
 
             uint256 currentStrategyAssets = IStrategy(strategy).totalAssets();
+            // This array is passed t `accrueInterest()` and avoid calling `totalAssets()` function for each strategy twice.
+            strategyCurrentAssets[i] = currentStrategyAssets;
             currentTotalAssets += currentStrategyAssets;
 
             if (currentStrategyAssets > config.lastTotalAssets) {
                 uint256 yield = currentStrategyAssets - config.lastTotalAssets;
                 strategyYields[i] = yield;
-                // This array is passed t `accrueInterest()` and avoid calling `totalAssets()` function for each strategy twice.
-                strategyCurrentAssets[i] = currentStrategyAssets;
                 totalStrategyYield += yield;
             }
 
