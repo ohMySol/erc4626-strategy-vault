@@ -20,6 +20,7 @@ library ConstantsLib {
     /// @dev BPS denominator (10_000 = 100%).
     uint256 internal constant BPS = 10_000;
 
-    /// @dev Maximum allowed length of the supply and withdraw queues.
-    uint256 internal constant MAX_QUEUE_LENGTH = 10;
+    /// @dev Maximum allowed number of strategies in the vault.
+    /// Supply/withdraw queues are limited to `MAX_STRATEGIES` strategies as well.
+    uint256 internal constant MAX_STRATEGIES = 10;
 }

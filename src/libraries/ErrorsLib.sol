@@ -26,6 +26,9 @@ library ErrorsLib {
     /// @notice Thrown when the sender is not the curator
     error NotCurator();
 
+    /// @notice Thrown when the sender is not the allocator
+    error NotAllocator();
+
     /// @notice Thrown when trying to act before a timelock has expired
     error TimelockNotElapsed();
 
@@ -86,7 +89,7 @@ library ErrorsLib {
     /// @notice Thrown when there is not enough liquidity in strategies to withdraw the requested assets.
     error NotEnoughLiquidity();
 
-    /// @notice Thrown when the maximum number of strategies is reached.
+    /// @notice Thrown when the maximum number of strategies in the vault is reached.
     error MaxStrategiesReached();
 
     /// @notice Thrown when the strategy is duplicated in the queue.

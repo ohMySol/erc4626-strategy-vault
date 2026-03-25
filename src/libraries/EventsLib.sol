@@ -30,6 +30,11 @@ library EventsLib {
     /// @dev Emitted when the curator is updated.
     /// @param newCurator The address of the new curator.
     event CuratorUpdated(address indexed newCurator);
+
+    /// @dev Emitted when the new allocator is set.
+    /// @param newAllocator The address of the new allocator.
+    /// @param newIsAllocator The flag set to the allocator address.
+    event AllocatorSet(address indexed newAllocator, bool newIsAllocator);
      
     /// @dev Emitted when the fee is updated.
     /// @param newFee The new fee in basis points.   
