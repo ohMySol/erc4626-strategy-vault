@@ -30,7 +30,7 @@ import {IStrategy, StrategyConfig} from "./interfaces/IStrategy.sol";
 /// Assets will be allocated to different yield strategies by `Allocator`, and the strategies will be selected by the vault `Curator`.
 /// Strategy can be created in a permissionless way, so anyone is allowed to create a strategy contract and propose it to include in the vault. 
 /// Once strategy is approved by curator and included in the vault, the strategy owner can earn a portion of the performance fee which is taken
-/// from the generated yield.
+/// from the generated yield in shares.
 ///
 /// @dev This contract demonstrates an ERC4626 vault contract which can be connected to different yield strategies.
 /// Each strategy contract that wants to be used by the vault contract must implement the `BaseStrategy` contract
@@ -89,7 +89,7 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
 
     /// @dev List of strategies currently included in the vault.
     /// Used as strategies registry.
-    /// IMPORTANT: Disabled strategies are not removed from the array. The max strategies amount is limited to `MAX_QUEUE_LENGTH`.
+    /// IMPORTANT: Disabled strategies are not removed from the array. The max strategies amount is limited to `MAX_STRATEGIES`.
     address[] internal _strategies;
 
     /// @dev List of strategies currently in the supply list.
@@ -103,6 +103,9 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
     /// @inheritdoc IVault
     mapping (address strategy => StrategyConfig) public strategyConfig;
 
+    /// @inheritdoc IVault
+    mapping (address allocator => bool) public isAllocator;
+
     /* MODIFIERS */
 
     /// @notice Modifier restrict access only to address with guardian role.
@@ -114,6 +117,12 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
     /// @notice Modifier restrict access only to address with the curator role.
     modifier onlyCurator() {
         if (msg.sender != curator) revert ErrorsLib.NotCurator();
+        _;
+    }
+
+    /// @notice Modifier restrict access only to address with the allocator role.
+    modifier onlyAllocator() {
+        if (!isAllocator[msg.sender]) revert ErrorsLib.NotAllocator();
         _;
     }
 
@@ -164,12 +173,14 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
     /* ERC4626 (PUBLIC) */
 
     /// @inheritdoc IERC4626
+    /// @dev Returns the maximum depositable assets based on remaining supply queue cap headroom.
     function maxDeposit(address) public view override returns (uint256 maxAssets) {
         maxAssets = _maxDeposit();
     }
 
     /// @inheritdoc IERC4626
-    /// @dev Convert suppliable assets to shares with fee-aware totals.
+    /// @dev Calculate mintable shares based on the available liquidity in supply queue.
+    /// The accrual of the performance fee is taken into account in exchange rate.
     function maxMint(address) public view override returns (uint256 maxShares) {
         uint256 suppliable = _maxDeposit();
 
@@ -180,12 +191,16 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
     }
 
     /// @inheritdoc IERC4626
+    /// @dev Returns the maximum withdrawable assets for `owner`.
+    /// The accrual of the performance fee is taken into account in exchange rate.
     function maxWithdraw(address owner) public view override returns (uint256 maxAssets) {
         (uint256 assets,,) = _maxWithdraw(owner);
         maxAssets = assets;
     }
 
     /// @inheritdoc IERC4626
+    /// @dev Returns the maximum redeemable shares for `owner`.
+    /// The accrual of the performance fee is taken into account in exchange rate.
     function maxRedeem(address owner) public view override returns (uint256 maxShares) {
         (uint256 assets, uint256 newTotalSupply, uint256 newTotalAssets) = _maxWithdraw(owner);
         if (assets == 0) return 0;
@@ -252,7 +267,7 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
     /// @inheritdoc ERC4626
     /// @dev Returns the total managed assets including vault's idle funds and strategies balances + lost assets.
     function totalAssets() public view virtual override returns (uint256) {
-        (uint256 newTotalAssets, , , , , ) = _calculateFeeAndTotals();
+        (uint256 newTotalAssets,,,,,) = _calculateFeeAndTotals();
         return newTotalAssets;
     }
 
@@ -344,6 +359,16 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
     }
 
     /// @inheritdoc IVault
+    function setAllocator(address newAllocator, bool newIsAllocator) external onlyOwner {
+        if (newAllocator == address(0)) revert ErrorsLib.ZeroAddress();
+        if (isAllocator[newAllocator] == newIsAllocator) revert ErrorsLib.AlreadySet();
+
+        isAllocator[newAllocator] = newIsAllocator;
+
+        emit EventsLib.AllocatorSet(newAllocator, newIsAllocator);
+    }
+
+    /// @inheritdoc IVault
     function submitGuardian(address newGuardian) external onlyOwner {
         if (newGuardian == address(0)) revert ErrorsLib.ZeroAddress();
         if (newGuardian == guardian) revert ErrorsLib.AlreadySet();
@@ -417,7 +442,7 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
         StrategyConfig storage config = strategyConfig[strategy];
 
         if (strategy == address(0)) revert ErrorsLib.ZeroAddress();
-        if (_strategies.length == ConstantsLib.MAX_QUEUE_LENGTH) revert ErrorsLib.MaxStrategiesReached();
+        if (_strategies.length == ConstantsLib.MAX_STRATEGIES) revert ErrorsLib.MaxStrategiesReached();
         // Checking strategy `enabled` is not enough because the strategy can be disabled and validation will read it as non existent strategy.
         // And `lastAccrualTimestamp` is used to avoid submitting the same strategy again.
         if (config.enabled || config.lastAccrualTimestamp != 0) revert ErrorsLib.StrategyAlreadyExists();
@@ -450,14 +475,14 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
     }
 
     /// @inheritdoc IVault
-    function setSupplyQueue(address[] calldata newSupplyQueue) external onlyCurator {
+    function setSupplyQueue(address[] calldata newSupplyQueue) external onlyAllocator {
         _checkQueue(newSupplyQueue);
         _supplyQueue = newSupplyQueue;
         emit EventsLib.SetSupplyQueue(newSupplyQueue);
     }
 
     /// @inheritdoc IVault
-    function setWithdrawQueue(address[] calldata newWithdrawQueue) external onlyCurator {
+    function setWithdrawQueue(address[] calldata newWithdrawQueue) external onlyAllocator {
         _checkQueue(newWithdrawQueue);
         _withdrawQueue = newWithdrawQueue;
         emit EventsLib.SetWithdrawQueue(newWithdrawQueue);
@@ -626,7 +651,7 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
     /// @param newQueue The new queue to check.
     function _checkQueue(address[] calldata newQueue) internal view {
         uint256 length = newQueue.length;
-        if (length > ConstantsLib.MAX_QUEUE_LENGTH) revert ErrorsLib.MaxQueueLengthExceeded();
+        if (length > ConstantsLib.MAX_STRATEGIES) revert ErrorsLib.MaxQueueLengthExceeded();
 
         for (uint256 i = 0; i < length;) {
             address strategy = newQueue[i];
@@ -646,6 +671,7 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
     /// @notice Supplies `assets` to the appropriate strategy using the supply queue.
     /// @dev Routes the assets to the appropriate strategy using the supply queue `_supplyQueue` 
     /// and updates the strategies `lastTotalAssets` value.
+    /// IMPORTANT: The function will revert if the caps across all strategies in `_supplyQueue` are reached.
     /// @param assets The amount of assets to supply.
     function _supplyToStrategy(uint256 assets) internal {
         uint256 length = _supplyQueue.length;
@@ -676,6 +702,7 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
 
     /// @notice Withdraws `assets` from the appropriate strategy using the withdraw queue.
     /// @dev Fetches assets from the strategies via `_withrawQueue` and updates the strategies `lastTotalAssets` value.
+    /// IMPORTANT: The function will revert if the requested assets cannot be covered by the available liquidity in the `_withdrawQueue`.
     /// @param assets The amount of assets to withdraw.
     function _withdrawFromStrategy(uint256 assets) internal {
         uint256 length = _withdrawQueue.length;
@@ -743,6 +770,7 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
             // yield can push strategyAssets above cap; treat as zero headroom (no underflow).
             if (strategyAssets >= config.cap) { unchecked {++i;} continue; }
 
+            // safe unchecked block because `strategyAssets` is always less than `config.cap`
             unchecked {
                 suppliable += config.cap - strategyAssets;
                 ++i;
@@ -794,6 +822,8 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
         return 9;
     }
 
+    /// @dev Returns the amount of shares that the vault would exchange for the amount of `assets` provided.
+    /// @dev The arguments `newTotalSupply` and `newTotalAssets` should be up to date and they taken from the current state of the vault.
     function _convertToSharesWithTotals(
         uint256 assets, 
         uint256 newTotalSupply, 
@@ -803,6 +833,8 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
         return assets.mulDiv(newTotalSupply + 10 ** _decimalsOffset(), newTotalAssets + 1, rounding);
     }
 
+    /// @dev Returns the amount of assets that the vault would exchange for the amount of `shares` provided.
+    /// @dev The arguments `newTotalSupply` and `newTotalAssets` should be up to date and they taken from the current state of the vault.
     function _convertToAssetsWithTotals(
         uint256 shares,
         uint256 newTotalSupply,
@@ -914,7 +946,7 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
             if (!config.enabled) { unchecked { ++i; } continue; }
 
             uint256 currentStrategyAssets = IStrategy(strategy).totalAssets();
-            // This array is passed t `accrueInterest()` and avoid calling `totalAssets()` function for each strategy twice.
+            // This array is passed to `accrueInterest()` and avoid calling `totalAssets()` function for each strategy twice.
             strategyCurrentAssets[i] = currentStrategyAssets;
             currentTotalAssets += currentStrategyAssets;
 
@@ -927,6 +959,7 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
             unchecked { ++i; }
         }
 
+        // Calculate the newLostAssets value
         uint256 lastLostAssets = lostAssets;
         newLostAssets = lastLostAssets;
 
@@ -934,6 +967,7 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
             newLostAssets = lastTotalAssets - currentTotalAssets;
         }
 
+        // Calculate the newTotalAssets value.
         newTotalAssets = currentTotalAssets + newLostAssets;
         uint256 totalInterest = newTotalAssets - lastTotalAssets;
 

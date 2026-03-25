@@ -66,6 +66,12 @@ interface IVault {
         uint256 lastTotalAssets
     );
 
+    /// @notice Whether the address is an allocator or not.
+    /// @dev A mapping of addresses that are allowed to set the supply and withdraw queues.
+    /// @param allocator The address to check.
+    /// @return Whether the address is an allocator or not.
+    function isAllocator(address allocator) external view returns (bool);
+
     /// @notice Deposit `assets` underlying tokens on behalf of the `owner` and send in exchange the corresponding number of vault shares to `receiver`.
     /// This function is using a gasless transaction mechanism, that allows the `owner` to sign a permit signature off chain(using ERC2612) 
     /// before calling this function, and provide the signature components.
@@ -141,6 +147,16 @@ interface IVault {
     /// @param newCurator The new curator address.
     function setCurator(address newCurator) external;
 
+    /// @notice Sets a new allocator address.
+    /// @dev Only the owner can set a new allocator address.
+    /// IMPORTANT: 
+    /// - The `newAllocator` address can not be the zero address.
+    /// - The `newAllocator` address must not be already set.
+    ///
+    /// @param newAllocator The new allocator address.
+    /// @param newIsAllocator The flag to set the allocator address.
+    function setAllocator(address newAllocator, bool newIsAllocator) external;
+
     /// @notice Submits a `newGuardian` address under timelock.
     /// @dev Only the owner can submit a `newGuardian` guardian. 
     /// The `newGuardian` can be accepted after the timelock has elapsed.
@@ -190,7 +206,7 @@ interface IVault {
     /// @notice Submits a `strategy` address and `strategyCap` value under timelock.
     /// @dev Only the curator can call this function.
     /// IMPORTANT: 
-    /// - The maximum number of strategies is `MAX_QUEUE_LENGTH`.
+    /// - The maximum number of strategies is `MAX_STRATEGIES`.
     /// - The `strategy` should be unique (no duplicates).
     /// - The `strategy` address can not be the zero address.
     /// - The `strategy` address must be connected to the vault.
@@ -216,9 +232,9 @@ interface IVault {
     function submitStrategyCap(address strategy, uint256 newStrategyCap) external;
 
     /// @notice Sets the supply queue.
-    /// @dev Only the curator can call this function.
+    /// @dev Only the allocator can call this function.
     /// IMPORTANT: 
-    /// - The `newSupplyQueue` length can not be greater than the `MAX_QUEUE_LENGTH`.
+    /// - The `newSupplyQueue` length can not be greater than the `MAX_STRATEGIES`.
     /// - The `newSupplyQueue` can not contain the zero address.
     /// - The `newSupplyQueue` can not contain the disabled strategy.
     /// - The `newSupplyQueue` can not contain the duplicate strategy.
@@ -227,9 +243,9 @@ interface IVault {
     function setSupplyQueue(address[] calldata newSupplyQueue) external;
 
     /// @notice Sets the withdraw queue.
-    /// @dev Only the curator can call this function.
+    /// @dev Only the allocator can call this function.
     /// IMPORTANT: 
-    /// - The `newWithdrawQueue` length can not be greater than the `MAX_QUEUE_LENGTH`.
+    /// - The `newWithdrawQueue` length can not be greater than the `MAX_STRATEGIES`.
     /// - The `newWithdrawQueue` can not contain the zero address.
     /// - The `newWithdrawQueue` can not contain the disabled strategy.
     /// - The `newWithdrawQueue` can not contain the duplicate strategy.
@@ -238,9 +254,10 @@ interface IVault {
     function setWithdrawQueue(address[] calldata newWithdrawQueue) external;
 
     /// @notice Disables a strategy.
-    /// @dev Only the curator can call this function. During the disabling process, all remaining assets are
-    /// withdrawn back to the vault, the strategy cap is set to zero, and the strategy is removed from the supply and withdraw queues,
-    /// if any pending changes exist they are revoked and the global snapshot is updated to reflect the new total assets balance.
+    /// @dev Only the curator can call this function. 
+    /// During the disabling process, all remaining assets are withdrawn back to the vault, the strategy cap is set to zero, 
+    /// and the strategy is removed from the supply and withdraw queues, if any pending changes exist they are revoked and 
+    /// the global snapshot is updated to reflect the new total assets balance.
     /// The `lostAssets` is updated to reflect the amount of assets that were lost due to the strategy being disabled.
     /// IMPORTANT: 
     /// - The `strategy` must be enabled.
