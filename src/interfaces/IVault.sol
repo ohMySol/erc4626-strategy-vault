@@ -255,10 +255,12 @@ interface IVault {
 
     /// @notice Disables a strategy.
     /// @dev Only the curator can call this function. 
-    /// During the disabling process, all remaining assets are withdrawn back to the vault, the strategy cap is set to zero, 
-    /// and the strategy is removed from the supply and withdraw queues, if any pending changes exist they are revoked and 
-    /// the global snapshot is updated to reflect the new total assets balance.
-    /// The `lostAssets` is updated to reflect the amount of assets that were lost due to the strategy being disabled.
+    /// During the disabling process the next changes are applied: 
+    /// - All remaining assets are withdrawn back to the vault.
+    /// - The strategy configuration and strategy pending changes are deleted.
+    /// - The strategy is removed from the registry (_strategies), queues (_supplyQueue,_withdrawQueue).
+    /// - The global snapshot is updated to reflect the new total assets balance.
+    /// - The `lostAssets` is updated to reflect the amount of assets that were lost during the disabling process.
     /// IMPORTANT: 
     /// - The `strategy` must be enabled.
     ///

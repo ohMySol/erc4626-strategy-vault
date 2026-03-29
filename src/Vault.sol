@@ -443,9 +443,7 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
 
         if (strategy == address(0)) revert ErrorsLib.ZeroAddress();
         if (_strategies.length == ConstantsLib.MAX_STRATEGIES) revert ErrorsLib.MaxStrategiesReached();
-        // Checking strategy `enabled` is not enough because the strategy can be disabled and validation will read it as non existent strategy.
-        // And `lastAccrualTimestamp` is used to avoid submitting the same strategy again.
-        if (config.enabled || config.lastAccrualTimestamp != 0) revert ErrorsLib.StrategyAlreadyExists();
+        if (config.enabled) revert ErrorsLib.StrategyAlreadyExists();
         if (IStrategy(strategy).vault() != address(this)) revert ErrorsLib.InvalidStrategy();
         if (IStrategy(strategy).asset() != asset()) revert ErrorsLib.InvalidStrategy();
         if (strategyCap == 0) revert ErrorsLib.ZeroStrategyCap();
@@ -495,17 +493,14 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
 
         _accrueInterest();
 
-        config.cap = 0;
-        config.enabled = false;
-        config.lastTotalAssets = 0;
-
+        delete strategyConfig[strategy];
         delete pendingStrategy[strategy];
         delete pendingStrategyCap[strategy];
 
-        _removeFromQueue(strategy, _supplyQueue);
-        _removeFromQueue(strategy, _withdrawQueue);
+        // Remove the strategy from the registry, supply queue, and withdraw queue
+        _removeStrategy(strategy);
 
-        // Withdraw all remaining assets from the strategy
+        // Withdraw all remaining assets from the strategy and update the lost assets
         uint256 strategyAssets = IStrategy(strategy).totalAssets();
         if (strategyAssets > 0) {
             uint256 withdrawnAssets = IStrategy(strategy).withdraw(strategyAssets, address(this));
@@ -622,19 +617,27 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
         emit EventsLib.StrategyCapUpdated(strategy, newStrategyCap);
     }
 
-    /// @notice Removes a strategy from the supply/withdraw queue using swap-and-pop.
-    /// @dev No-op if the strategy is not in the queue.
+    /// @notice Removes `strategy` from `_strategies` registry, `_supplyQueue`, and `_withdrawQueue`.
     /// @param strategy The address of the strategy to remove.
-    /// @param queue The queue to remove the strategy from.
-    function _removeFromQueue(address strategy, address[] storage queue) internal {
-        uint256 len = queue.length;
-        for (uint256 i; i < len;) {
-            if (queue[i] == strategy) {
-                queue[i] = queue[len - 1];
-                queue.pop();
-                return;
+    function _removeStrategy(address strategy) internal {
+        _swapAndPop(_strategies, strategy);
+        _swapAndPop(_supplyQueue, strategy);
+        _swapAndPop(_withdrawQueue, strategy);
+    }
+
+    /// @notice Swap-and-pop removal of all occurrences of `strategy` from `list`.
+    /// @dev Order is not preserved.
+    /// @param list The list to remove the strategy from.
+    /// @param strategy The address of the strategy to remove.
+    function _swapAndPop(address[] storage list, address strategy) internal {
+        uint256 i;
+        while (i < list.length) {
+            if (list[i] == strategy) {
+                list[i] = list[list.length - 1];
+                list.pop();
+            } else {
+                unchecked { ++i; }
             }
-            unchecked { ++i; }
         }
     }
 
@@ -683,9 +686,9 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
             if (!config.enabled) { unchecked {++i;} continue; }
 
             uint256 strategyAssets = IStrategy(strategy).totalAssets();
+            if (strategyAssets >= config.cap) { unchecked {++i;} continue; }
             uint256 remainingCap = config.cap - strategyAssets;
             
-            // If the remainingCap will underflow - result to 0, then the strategy cap is reached, and we skip the strategy deposit.
             if (remainingCap > 0) {
                 uint256 toSupply = assets > remainingCap ? remainingCap : assets;
                 
@@ -938,6 +941,7 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
         uint256 currentTotalAssets = IERC20(asset()).balanceOf(address(this));
         uint256 length = _strategies.length;
         strategyYields = new uint256[](length);
+        strategyCurrentAssets = new uint256[](length);
 
         for (uint256 i = 0; i < length; ) {
             address strategy = _strategies[i];
@@ -973,6 +977,8 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
 
         if (totalInterest != 0 && fee != 0) {
             uint256 feeAssets = totalInterest.mulDiv(fee, ConstantsLib.BPS);
+            // `newTotalAssets - feeAssets` means when minting fee shares, price them against the pool after removing the fee slice, 
+            // so the minted shares actually correspond to that fee amount.
             feeShares = _convertToSharesWithTotals(feeAssets, totalSupply(), newTotalAssets - feeAssets, Math.Rounding.Floor);
         }
     }
