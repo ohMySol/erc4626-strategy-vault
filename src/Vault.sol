@@ -212,12 +212,9 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
     /// @dev Can be paused by the owner in case of emergency.
     /// Instead of calling `previewDeposit()` with expensive `totalAssets()` function inside, the function calculates 
     /// the current total assets inside `_accrueInterest()` function and use it to calculate the shares.
+    /// IMPORTANT: The function omits the `maxDeposit` check to save gas and it will revert if the strategies caps are reached.
     function deposit(uint256 assets, address receiver) public virtual override whenNotPaused returns (uint256 shares) {
         _accrueInterest();
-
-        uint256 maxAssets = maxDeposit(receiver);
-        if (assets > maxAssets) revert ERC4626ExceededMaxDeposit(receiver, assets, maxAssets);
-
         shares = _convertToSharesWithTotals(assets, totalSupply(), lastTotalAssets, Math.Rounding.Floor);
         _deposit(msg.sender, receiver, assets, shares);
     }
@@ -226,12 +223,9 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
     /// @dev Can be paused by the owner in case of emergency.
     /// Instead of calling `previewMint()` with expensive `totalAssets()` function inside, the function calculates 
     /// the current total assets inside `_accrueInterest()` function and use it to calculate the assets.
+    /// IMPORTANT: The function omits the `maxMint` check to save gas and it will revert if the strategies caps are reached.
     function mint(uint256 shares, address receiver) public virtual override whenNotPaused returns (uint256 assets) {
        _accrueInterest();
-
-       uint256 maxShares = maxMint(receiver);
-       if (shares > maxShares) revert ERC4626ExceededMaxMint(receiver, shares, maxShares);
-
        assets = _convertToAssetsWithTotals(shares, totalSupply(), lastTotalAssets, Math.Rounding.Ceil);
        _deposit(msg.sender, receiver, assets, shares);
     }
@@ -240,12 +234,9 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
     /// @dev Can be paused by the owner in case of emergency.
     /// Instead of calling `previewWithdraw()` with expensive `totalAssets()` function inside, the function calculates 
     /// the current total assets inside `_accrueInterest()` function and use it to calculate the shares.
+    /// IMPORTANT: The function omits the `maxWithdraw` check to save gas and it will revert if there is not enough liquidity in the strategies.
     function withdraw(uint256 assets, address receiver, address owner) public virtual override whenNotPaused returns (uint256 shares) {
         _accrueInterest();
-
-        uint256 maxAssets = maxWithdraw(owner);
-        if (assets > maxAssets) revert ERC4626ExceededMaxWithdraw(owner, assets, maxAssets);
-
         shares = _convertToSharesWithTotals(assets, totalSupply(), lastTotalAssets, Math.Rounding.Ceil);
         _withdraw(msg.sender, receiver, owner, assets, shares);
     }
@@ -254,12 +245,9 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
     /// @dev Can be paused by the owner in case of emergency.
     /// Instead of calling `previewRedeem()` with expensive `totalAssets()` function inside, the function calculates 
     /// the current total assets inside `_accrueInterest()` function and use it to calculate the assets.
+    /// IMPORTANT: The function omits the `maxRedeem` check to save gas and it will revert if there is not enough liquidity in the strategies.
     function redeem(uint256 shares, address receiver, address owner) public virtual override whenNotPaused returns (uint256 assets) {
         _accrueInterest();
-
-        uint256 maxShares = maxRedeem(owner);
-        if (shares > maxShares) revert ERC4626ExceededMaxRedeem(owner, shares, maxShares);
-
         assets = _convertToAssetsWithTotals(shares, totalSupply(), lastTotalAssets, Math.Rounding.Floor);
         _withdraw(msg.sender, receiver, owner, assets, shares);
     }
