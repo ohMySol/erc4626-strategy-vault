@@ -364,7 +364,7 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
 
         pendingGuardian.update(newGuardian, timelock);
 
-        emit EventsLib.GuardianSubmited(newGuardian);
+        emit EventsLib.GuardianSubmitted(newGuardian);
     }
 
     /// @inheritdoc IVault
@@ -496,6 +496,9 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
                 lostAssets += strategyAssets - withdrawnAssets;
             }
         }
+        
+        // Revoke the strategy's approval to spend the vault's asset.
+        IERC20(asset()).approve(strategy, 0);
 
         // Update the global snapshot to reflect the new total assets balance.
         _updateLastTotalAssets(totalAssets());
@@ -591,6 +594,10 @@ contract Vault is ERC4626, Ownable2Step, Pausable, IVault {
         delete pendingStrategy[strategy];
         // Duplicates avoided during the duplicate check in `submitStrategy` function
         _strategies.push(strategy); 
+
+        // Approve the strategy to spend the vault's asset. The max amount approval is safe, because the
+        // strategies enforced with caps + deposit/withdraw `BaseStrategy` functions are restricted to only vault.
+        IERC20(asset()).approve(strategy, type(uint256).max);
         
         emit EventsLib.StrategySet(strategy, strategyCap);
     }

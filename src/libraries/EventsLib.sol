@@ -50,7 +50,7 @@ library EventsLib {
 
     /// @dev Emitted when the guardian update is submitted.
     /// @param newGuardian The address of the new guardian.
-    event GuardianSubmited(address indexed newGuardian);
+    event GuardianSubmitted(address indexed newGuardian);
 
     /// @dev Emitted when the timelock update is submitted.
     /// @param newTimelock The new timelock duration.
