@@ -3,16 +3,13 @@ pragma solidity 0.8.30;
 
 import {Test} from "forge-std/Test.sol";
 
-import {MyToken} from "../src/MyToken.sol";
+import {MyToken} from "../../src/MyToken.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
-import {ErrorsLib} from "../src/libraries/ErrorsLib.sol";
+import {ErrorsLib} from "../../src/libraries/ErrorsLib.sol";
+import {PermitHash} from "../../src/libraries/test-helper-lib/PermitHash.sol";
 
 contract MyTokenTest is Test {
-   bytes32 constant PERMIT_TYPEHASH = keccak256(
-        "Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"
-    );
-
     error ERC2612ExpiredSignature(uint256 deadline);
     error ERC2612InvalidSigner(address signer, address owner);
 
@@ -61,25 +58,11 @@ contract MyTokenTest is Test {
 
     /* PERMIT TESTS */
 
-    function _getPermitDigest(
-        address tokenOwner,
-        address spender,
-        uint256 value,
-        uint256 deadline
-    ) internal view returns (bytes32) {
-        uint256 nonce = myToken.nonces(tokenOwner);
-        bytes32 structHash = keccak256(
-            abi.encode(PERMIT_TYPEHASH, tokenOwner, spender, value, nonce, deadline)
-        );
-        bytes32 domainSeparator = myToken.DOMAIN_SEPARATOR();
-        return keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
-    }
-
     function test_permit_should_permit_spender_to_spend_tokens() public {
         uint256 amount = 100 ether;
         uint256 deadline = block.timestamp + 1 hours;
 
-        bytes32 digest = _getPermitDigest(owner, user, amount, deadline);
+        bytes32 digest = PermitHash.getPermitDigest(myToken, owner, user, amount, deadline);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(permitOwnerKey, digest);
 
         // Anyone can submit the permit | we call it as user (the spender).
@@ -93,7 +76,7 @@ contract MyTokenTest is Test {
         uint256 amount = 50 ether;
         uint256 deadline = block.timestamp + 1 hours;
 
-        bytes32 digest = _getPermitDigest(owner, user, amount, deadline);
+        bytes32 digest = PermitHash.getPermitDigest(myToken, owner, user, amount, deadline);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(permitOwnerKey, digest);
 
         vm.startPrank(user);
@@ -109,7 +92,7 @@ contract MyTokenTest is Test {
         uint256 amount = 100 ether;
         uint256 deadline = block.timestamp - 1; // already expired
 
-        bytes32 digest = _getPermitDigest(owner, user, amount, deadline);
+        bytes32 digest = PermitHash.getPermitDigest(myToken, owner, user, amount, deadline);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(permitOwnerKey, digest);
 
         vm.expectRevert(abi.encodeWithSelector(ERC2612ExpiredSignature.selector, deadline));
@@ -124,11 +107,11 @@ contract MyTokenTest is Test {
         uint256 amount = 50 ether;
         uint256 deadline = block.timestamp + 1 hours;
 
-        bytes32 digestSigned = _getPermitDigest(owner, user, amount, deadline);
+        bytes32 digestSigned = PermitHash.getPermitDigest(myToken, owner, user, amount, deadline);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(permitOwnerKey, digestSigned);
 
         // Contract will use this digest (for user2 as owner), so recovery gives the "wrong" signer.
-        bytes32 digestUsedByContract = _getPermitDigest(user2, user, amount, deadline);
+        bytes32 digestUsedByContract = PermitHash.getPermitDigest(myToken, user2, user, amount, deadline);
         address recoveredSigner = ecrecover(digestUsedByContract, v, r, s);
 
         vm.expectRevert(abi.encodeWithSelector(ERC2612InvalidSigner.selector, recoveredSigner, user2));

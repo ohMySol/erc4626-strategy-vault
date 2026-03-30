@@ -3,13 +3,13 @@ pragma solidity 0.8.30;
 
 import {Test} from "forge-std/Test.sol";
 
-import {VaultFactory} from "../src/VaultFactory.sol";
-import {MyToken} from "../src/MyToken.sol";
+import {VaultFactory} from "../../src/VaultFactory.sol";
+import {MyToken} from "../../src/MyToken.sol";
 
-import {IVault} from "../src/interfaces/IVault.sol";
-import {EventsLib} from "../src/libraries/EventsLib.sol";
+import {IVault} from "../../src/interfaces/IVault.sol";
+import {EventsLib} from "../../src/libraries/EventsLib.sol";
 
-contract VaultFactoryTest is Test {
+contract VaultFactoryTest is Test { 
     VaultFactory public vaultFactory;
     MyToken public myToken;
     address owner = makeAddr("owner");
