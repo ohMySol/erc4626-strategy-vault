@@ -3,8 +3,7 @@
 An ERC-4626 yield vault with a **permissionless strategy marketplace**, timelocks for critical actions, role-based access control, gasless deposits and mints via ERC-2612 permit, and a performance fee model that splits yield between the vault protocol and strategy creators.
 
 > **IMPORTANT**:
-> - This project is a prototype for demonstration and learning purposes. It has not been audited and is not production-ready.
-> - The project is still in development, so architecture and code may change over time.
+> - The code isn't audited, keep this in mind.
 
 ## Overview
 
